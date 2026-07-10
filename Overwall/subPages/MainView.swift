@@ -14,7 +14,7 @@ struct MainView: View {
         Form {
             Toggle("Toggle", isOn: $isOnVPN)
         }.scrollContentBackground(.hidden)
-            .background(Color.gray.opacity(0.1))
+            .background(Color.background)
     }
 }
 
