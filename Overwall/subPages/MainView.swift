@@ -14,7 +14,6 @@ enum Routing: String, CaseIterable, Identifiable {
     
     var id: Self { self }
 }
-
 enum TCM: String, CaseIterable, Identifiable {
     case tcp
     case icmp
@@ -29,39 +28,45 @@ struct MainView: View {
     @State private var testConnectivityMethod: TCM = .tcp
     
     var body: some View {
-        // Head
-        Form {
-            // Toggle VPN
-            Toggle(isOn: $isOnVPN) {
-                Label("Toggle VPN", systemImage: isOnVPN ? "shield.fill" : "shield.slash")
+        VStack(alignment: .leading) {
+                // Head
+            Form {
+                    // Toggle VPN
+                Toggle(isOn: $isOnVPN) {
+                    Label("Toggle VPN", systemImage: isOnVPN ? "shield.fill" : "shield.slash")
+                }
+                
+                    // Routing
+                Picker(selection: $routing) {
+                    Text("Global").tag(Routing.global)
+                    Text("Config").tag(Routing.config)
+                    Text("Direct").tag(Routing.direct)
+                } label : {
+                    Label("Routing", systemImage: "arrow.branch")
+                }
+                
+                    // Test Connectivity
+                Picker(selection: $testConnectivityMethod) {
+                    Text("TCP").tag(TCM.tcp)
+                    Text("ICMP").tag(TCM.icmp)
+                    Text("Connect").tag(TCM.connect)
+                } label: {
+                    Label("Test Connectivity", systemImage: "arrow.2.circlepath")
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                    // Test Connectivity Code
+                            }
+                        )
+                }
             }
+            .padding(.bottom, 50)
             
-            // Routing
-            Picker(selection: $routing) {
-                Text("Global").tag(Routing.global)
-                Text("Config").tag(Routing.config)
-                Text("Direct").tag(Routing.direct)
-            } label : {
-                Label("Routing", systemImage: "arrow.branch")
-            }
-            
-            // Test Connectivity
-            Picker(selection: $testConnectivityMethod) {
-                Text("TCP").tag(TCM.tcp)
-                Text("ICMP").tag(TCM.icmp)
-                Text("Connect").tag(TCM.connect)
-            } label: {
-                Label("Test Connectivity", systemImage: "arrow.2.circlepath")
-                    .simultaneousGesture(
-                        TapGesture().onEnded {
-                            // Test Connectivity Code
-                        }
-                    )
+                // Body
+            CollapsibleForm("Default", onEdit: {}) {
+                
             }
         }
-        
-        
-        
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 

@@ -18,11 +18,21 @@ extension Color {
 /// system behavior.
 struct Form<Content: View>: View {
     private let content: Content
+    private let heightOverride: CGFloat?
+    private let verticalContentMargin: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fittedHeight: CGFloat?
     @State private var maximumHeight: CGFloat?
 
-    init(@ViewBuilder content: () -> Content) {
+    init(
+        height: CGFloat? = nil,
+        verticalContentMargin: CGFloat = 8,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.heightOverride = height
+        self.verticalContentMargin = verticalContentMargin
         self.content = content()
+        self._fittedHeight = State(initialValue: height)
     }
 
     var body: some View {
@@ -33,27 +43,32 @@ struct Form<Content: View>: View {
                 .listRowBackground(Color.clear)
         }
         .scrollContentBackground(.hidden)
-        .contentMargins(.vertical, 8, for: .scrollContent)
+        .contentMargins(.vertical, verticalContentMargin, for: .scrollContent)
         .background(Color.clear)
         .clipShape(shape)
         .onScrollGeometryChange(for: FormScrollMetrics.self) { geometry in
             FormScrollMetrics(
-                contentHeight: geometry.contentSize.height
-                    + geometry.contentInsets.top
-                    + geometry.contentInsets.bottom,
+                contentHeight: geometry.contentSize.height,
                 containerHeight: geometry.containerSize.height,
                 isContentMeasured: geometry.contentSize.height > 1
             )
         } action: { _, metrics in
             updateHeight(using: metrics)
         }
-        .frame(height: fittedHeight)
+        .frame(height: heightOverride ?? fittedHeight)
         .frame(maxWidth: .infinity)
         .compatibleGlassSurface(cornerRadius: 30)
         .padding(.horizontal)
     }
 
     private func updateHeight(using metrics: FormScrollMetrics) {
+        // A fixed height represents a temporary collapsed presentation. Keep
+        // the last measured expanded height so reopening can begin
+        // immediately without waiting for another geometry callback.
+        guard heightOverride == nil else {
+            return
+        }
+
         // A Form can emit an empty geometry value during its first layout
         // pass. Leaving the frame unconstrained gives its rows room to lay
         // out and produce the real content size on the following pass.
@@ -65,18 +80,19 @@ struct Form<Content: View>: View {
             // The first unconstrained layout is the height offered by the
             // parent. Preserve it as the point where Form starts scrolling.
             maximumHeight = metrics.containerHeight
-        } else if let fittedHeight,
-                  metrics.containerHeight < fittedHeight - 0.5 {
-            // Keep the form inside a parent that became shorter, for example
-            // after rotation or a keyboard presentation.
-            maximumHeight = metrics.containerHeight
         }
 
         let availableHeight = maximumHeight ?? metrics.containerHeight
         let nextHeight = min(metrics.contentHeight, availableHeight)
 
         if fittedHeight == nil || abs((fittedHeight ?? 0) - nextHeight) > 0.5 {
-            fittedHeight = nextHeight
+            if fittedHeight == nil || reduceMotion {
+                fittedHeight = nextHeight
+            } else {
+                withAnimation(.smooth(duration: 0.24)) {
+                    fittedHeight = nextHeight
+                }
+            }
         }
     }
 }
