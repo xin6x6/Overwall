@@ -9,6 +9,14 @@ import SwiftUI
 
 struct ConfigView: View {
     var body: some View {
-        Text("Config")
+        NavigationStack {
+            Form {
+                Text("1")
+            }
+        }
     }
+}
+
+#Preview {
+    ContentView()
 }

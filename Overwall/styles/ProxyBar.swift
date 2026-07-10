@@ -41,16 +41,20 @@ struct ProxyNode: Identifiable, Hashable {
 struct ProxyBar: View {
     @Binding private var node: ProxyNode
     @State private var isEditing = false
+    @State private var isConfirmingDeletion = false
     private let isSelected: Bool
+    private let onDelete: () -> Void
     private let onSelect: () -> Void
 
     init(
         node: Binding<ProxyNode>,
         isSelected: Bool,
+        onDelete: @escaping () -> Void = {},
         onSelect: @escaping () -> Void
     ) {
         self._node = node
         self.isSelected = isSelected
+        self.onDelete = onDelete
         self.onSelect = onSelect
     }
 
@@ -99,6 +103,20 @@ struct ProxyBar: View {
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)
         .environment(\.defaultMinListRowHeight, 52)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                isConfirmingDeletion = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .tint(.red)
+        }
+        .alert("Delete Proxy?", isPresented: $isConfirmingDeletion) {
+            Button("Delete", role: .destructive, action: onDelete)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to delete \(node.name)? This action cannot be undone.")
+        }
         .navigationDestination(isPresented: $isEditing) {
             ProxyNodeEditorView(node: $node)
         }
@@ -260,7 +278,13 @@ private struct ProxyBarPreview: View {
                 ForEach($nodes) { $node in
                     ProxyBar(
                         node: $node,
-                        isSelected: selectedNodeID == node.id
+                        isSelected: selectedNodeID == node.id,
+                        onDelete: {
+                            nodes.removeAll { $0.id == node.id }
+                            if selectedNodeID == node.id {
+                                selectedNodeID = nil
+                            }
+                        }
                     ) {
                         selectedNodeID = node.id
                     }
