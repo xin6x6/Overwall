@@ -14,6 +14,7 @@ struct CollapsibleForm<Content: View>: View {
     @State private var isExpanded: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private let onRefresh: () -> Void
     private let onEdit: () -> Void
     private let content: Content
 
@@ -21,12 +22,14 @@ struct CollapsibleForm<Content: View>: View {
         _ title: LocalizedStringKey,
         initiallyExpanded: Bool = true,
         collapsedHeight: CGFloat = 52,
+        onRefresh: @escaping () -> Void = {},
         onEdit: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self._isExpanded = State(initialValue: initiallyExpanded)
         self.collapsedHeight = collapsedHeight
+        self.onRefresh = onRefresh
         self.onEdit = onEdit
         self.content = content()
     }
@@ -84,6 +87,17 @@ struct CollapsibleForm<Content: View>: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isExpanded ? "Collapse" : "Expand")
+            .accessibilityValue(Text(title))
+
+            Button(action: onRefresh) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Refresh")
             .accessibilityValue(Text(title))
 
             Button(action: onEdit) {
