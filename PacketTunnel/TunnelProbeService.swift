@@ -4,6 +4,7 @@ import Network
 
 struct TunnelProbeRequest: Codable {
     let type: String
+    let testKind: String
     let method: String
     let probes: [TunnelProbeItem]
 }
@@ -13,6 +14,7 @@ struct TunnelProbeItem: Codable {
     let address: String
     let port: Int
     let outboundTag: String
+    let speedTestPort: Int?
 }
 
 struct TunnelProbeResponse: Codable {
@@ -23,25 +25,58 @@ struct TunnelProbeResponse: Codable {
 struct TunnelProbeResult: Codable {
     let id: UUID
     let latency: Int?
+    let speedMegabytesPerSecond: Double?
 }
 
 struct TunnelProbeService {
     func run(_ request: TunnelProbeRequest) async -> TunnelProbeResponse {
-        let results = await withTaskGroup(of: TunnelProbeResult.self, returning: [TunnelProbeResult].self) { group in
-            for probe in request.probes {
-                group.addTask {
-                    let latency: Int?
-                    switch request.method.lowercased() {
-                    case "icmp": latency = await icmpLatency(host: probe.address)
-                    case "connect": latency = await outboundConnectLatency(tag: probe.outboundTag)
-                    default: latency = await tcpLatency(host: probe.address, port: probe.port)
+        var latencies: [UUID: Int?] = [:]
+        if request.testKind == "latency" {
+            latencies = await withTaskGroup(of: (UUID, Int?).self, returning: [UUID: Int?].self) { group in
+                for probe in request.probes {
+                    group.addTask {
+                        let latency: Int?
+                        switch request.method.lowercased() {
+                        case "icmp": latency = await icmpLatency(host: probe.address)
+                        case "connect": latency = await outboundConnectLatency(tag: probe.outboundTag)
+                        default: latency = await tcpLatency(host: probe.address, port: probe.port)
+                        }
+                        return (probe.id, latency)
                     }
-                    return TunnelProbeResult(id: probe.id, latency: latency)
                 }
+                var values: [UUID: Int?] = [:]
+                for await (id, value) in group { values[id] = value }
+                return values
             }
-            var values: [TunnelProbeResult] = []
-            for await value in group { values.append(value) }
-            return values
+        }
+        var results: [TunnelProbeResult] = []
+        if request.testKind == "speed" {
+            // Test up to three nodes at once: substantially faster than fully
+            // serial testing without letting a large subscription saturate
+            // the device with dozens of competing downloads.
+            for start in stride(from: 0, to: request.probes.count, by: 3) {
+                let batch = request.probes[start..<min(start + 3, request.probes.count)]
+                let batchResults = await withTaskGroup(of: TunnelProbeResult.self, returning: [TunnelProbeResult].self) { group in
+                    for probe in batch {
+                        group.addTask {
+                            let speed = if let port = probe.speedTestPort {
+                                await downloadSpeed(proxyPort: port)
+                            } else {
+                                nil as Double?
+                            }
+                            return TunnelProbeResult(id: probe.id, latency: nil, speedMegabytesPerSecond: speed)
+                        }
+                    }
+                    var values: [TunnelProbeResult] = []
+                    for await value in group { values.append(value) }
+                    return values
+                }
+                results.append(contentsOf: batchResults)
+            }
+        } else {
+            results = request.probes.map {
+                TunnelProbeResult(id: $0.id, latency: latencies[$0.id] ?? nil, speedMegabytesPerSecond: nil)
+            }
         }
         return TunnelProbeResponse(results: results, error: nil)
     }
@@ -205,6 +240,53 @@ private func outboundConnectLatency(tag: String) async -> Int? {
     } catch {
         return nil
     }
+}
+
+private func downloadSpeed(proxyPort: Int) async -> Double? {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = 15
+    configuration.timeoutIntervalForResource = 20
+    configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+    configuration.connectionProxyDictionary = [
+        "HTTPEnable": 1,
+        "HTTPProxy": "127.0.0.1",
+        "HTTPPort": proxyPort,
+        "HTTPSEnable": 1,
+        "HTTPSProxy": "127.0.0.1",
+        "HTTPSPort": proxyPort,
+    ]
+    let session = URLSession(configuration: configuration)
+    do {
+        // Establish the proxy, TLS session and congestion window before the
+        // timed sample. This prevents handshake latency from dominating fast
+        // nodes and producing values such as 0.1–1.5 MiB/s.
+        guard let warmupURL = speedTestURL(bytes: 131_072) else { return nil }
+        _ = try await session.data(from: warmupURL)
+
+        guard let measuredURL = speedTestURL(bytes: 4_194_304) else { return nil }
+        let started = ContinuousClock.now
+        let (data, response) = try await session.data(from: measuredURL)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              data.count >= 4_194_304 else { return nil }
+        let duration = started.duration(to: .now).components
+        let elapsed = max(
+            Double(duration.seconds) + Double(duration.attoseconds) / 1_000_000_000_000_000_000,
+            0.001
+        )
+        return Double(data.count) / 1_048_576 / elapsed
+    } catch {
+        return nil
+    }
+}
+
+private func speedTestURL(bytes: Int) -> URL? {
+    var components = URLComponents(string: "https://speed.cloudflare.com/__down")
+    components?.queryItems = [
+        URLQueryItem(name: "bytes", value: String(bytes)),
+        URLQueryItem(name: "cache", value: UUID().uuidString),
+    ]
+    return components?.url
 }
 
 private func icmpLatency(host: String) async -> Int? {

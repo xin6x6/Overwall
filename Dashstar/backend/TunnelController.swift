@@ -67,7 +67,24 @@ final class TunnelController {
         }
     }
 
-    func latencyTest(method: String, servers: [StoredProxyServer], snapshot: ProxyAppSnapshot) async throws -> [UUID: Int] {
+    func latencyTest(method: String, servers: [StoredProxyServer], snapshot: ProxyAppSnapshot) async throws -> [UUID: NodeConnectivityResult] {
+        try await connectivityTest(kind: "latency", method: method, servers: servers, snapshot: snapshot)
+    }
+
+    func speedTest(servers: [StoredProxyServer], snapshot: ProxyAppSnapshot) async throws -> [UUID: NodeConnectivityResult] {
+        return try await connectivityTest(kind: "speed", method: "connect", servers: servers, snapshot: snapshot)
+    }
+
+    func prepareForConnectivityTest(speed: Bool, snapshot: ProxyAppSnapshot) async throws {
+        if status != .connected && status != .reasserting {
+            await setEnabled(true, snapshot: snapshot)
+            try await waitUntilConnected()
+        } else if speed {
+            await reload(snapshot: snapshot)
+        }
+    }
+
+    private func connectivityTest(kind: String, method: String, servers: [StoredProxyServer], snapshot: ProxyAppSnapshot) async throws -> [UUID: NodeConnectivityResult] {
         if status != .connected {
             await setEnabled(true, snapshot: snapshot)
             try await waitUntilConnected()
@@ -75,15 +92,18 @@ final class TunnelController {
         guard let session = manager?.connection as? NETunnelProviderSession else {
             throw TunnelProbeError.sessionUnavailable
         }
+        let probePorts = SingBoxConfigBuilder.probePortMap(from: snapshot)
         let request = TunnelProbeRequest(
             type: "latencyTest",
+            testKind: kind,
             method: method,
             probes: servers.map {
                 TunnelProbeItem(
                     id: $0.id,
                     address: $0.address,
                     port: $0.port,
-                    outboundTag: SingBoxConfigBuilder.outboundTag(for: $0.id)
+                    outboundTag: SingBoxConfigBuilder.outboundTag(for: $0.id),
+                    speedTestPort: probePorts[$0.id]
                 )
             }
         )
@@ -92,8 +112,8 @@ final class TunnelController {
         guard let responseData else { throw TunnelProbeError.emptyResponse }
         let response = try JSONDecoder().decode(TunnelProbeResponse.self, from: responseData)
         if let error = response.error { throw TunnelProbeError.providerRejected(error) }
-        return Dictionary(uniqueKeysWithValues: response.results.compactMap { item in
-            item.latency.map { (item.id, $0) }
+        return Dictionary(uniqueKeysWithValues: response.results.map {
+            ($0.id, NodeConnectivityResult(latency: $0.latency, speedMegabytesPerSecond: $0.speedMegabytesPerSecond))
         })
     }
 
@@ -191,6 +211,7 @@ final class TunnelController {
 
 private struct TunnelProbeRequest: Codable {
     let type: String
+    let testKind: String
     let method: String
     let probes: [TunnelProbeItem]
 }
@@ -200,6 +221,7 @@ private struct TunnelProbeItem: Codable {
     let address: String
     let port: Int
     let outboundTag: String
+    let speedTestPort: Int?
 }
 
 private struct TunnelProbeResponse: Codable {
@@ -231,6 +253,12 @@ private struct TunnelTrafficResponse: Codable {
 private struct TunnelProbeResult: Codable {
     let id: UUID
     let latency: Int?
+    let speedMegabytesPerSecond: Double?
+}
+
+struct NodeConnectivityResult {
+    let latency: Int?
+    let speedMegabytesPerSecond: Double?
 }
 
 private enum TunnelProbeError: LocalizedError {

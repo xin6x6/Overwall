@@ -37,7 +37,8 @@ struct MainView: View {
     @State private var editingGroup: StoredProxyGroup?
     @State private var groupPendingDeletion: StoredProxyGroup?
     @State private var operationError: String?
-    @State private var isTestingConnectivity = false
+    @State private var isTestingLatency = false
+    @State private var isTestingSpeed = false
     @State private var refreshingGroupIDs: Set<UUID> = []
     
     var body: some View {
@@ -46,7 +47,7 @@ struct MainView: View {
                 LazyVStack(alignment: .leading, spacing: 8) {
                 // Head
                 Form(
-                    height: 164,
+                    height: 216,
                     verticalContentMargin: 4,
                     allowsScrolling: false
                 ) {
@@ -70,31 +71,51 @@ struct MainView: View {
                 }
                 .sensoryFeedback(.selection, trigger: routing)
                 
-                    // Test Connectivity
+                    // Test Latency
                 Picker(selection: $testConnectivityMethod) {
                     Text("TCP").tag(TCM.tcp)
                     Text("ICMP").tag(TCM.icmp)
                     Text("Connect").tag(TCM.connect)
                 } label: {
                     Label {
-                        Text("Test Connectivity")
+                        Text("Test Latency")
                     } icon: {
                         TimelineView(.animation(
                             minimumInterval: 1.0 / 30.0,
-                            paused: !isTestingConnectivity
+                            paused: !isTestingLatency
                         )) { context in
                             Image(systemName: "arrow.2.circlepath")
-                                .rotationEffect(connectivityIconRotation(at: context.date))
+                                .rotationEffect(testIconRotation(at: context.date, isActive: isTestingLatency))
                         }
                     }
                         .simultaneousGesture(
                             TapGesture().onEnded {
-                                Task { await testAllServers() }
+                                Task { await testAllLatencies() }
                             }
                         )
                 }
-                .disabled(isTestingConnectivity)
+                .disabled(isTestingLatency || isTestingSpeed)
                 .sensoryFeedback(.selection, trigger: testConnectivityMethod)
+
+                Button {
+                    Task { await testAllSpeeds() }
+                } label: {
+                    Label {
+                        Text("Test Speed")
+                    } icon: {
+                        TimelineView(.animation(
+                            minimumInterval: 1.0 / 30.0,
+                            paused: !isTestingSpeed
+                        )) { context in
+                            Image(systemName: "speedometer")
+                                .rotationEffect(testIconRotation(at: context.date, isActive: isTestingSpeed))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isTestingLatency || isTestingSpeed)
                 }
                 .environment(\.defaultMinListRowHeight, 52)
                 .padding(.bottom, 30)
@@ -141,6 +162,16 @@ struct MainView: View {
                             addDestination = .group
                         } label: {
                             Label("Add Group", systemImage: "folder.badge.plus")
+                        }
+
+
+                        Button {
+                            NotificationCenter.default.post(
+                                name: .importSubscriptionFromClipboard,
+                                object: nil
+                            )
+                        } label: {
+                            Label("Add Via Clipboard", systemImage: "doc.on.clipboard")
                         }
                     } label: {
                         Image(systemName: "plus")
@@ -448,33 +479,69 @@ struct MainView: View {
                 }
             }
             await tunnel.reload(snapshot: store.snapshot)
-            try await testServers(in: groupID)
+            try await testLatencyServers(in: groupID)
         } catch {
             operationError = error.localizedDescription
         }
     }
 
-    private func testAllServers() async {
-        guard !isTestingConnectivity else { return }
-        isTestingConnectivity = true
-        defer { isTestingConnectivity = false }
+    private func testAllLatencies() async {
+        guard !isTestingLatency, !isTestingSpeed else { return }
+        isTestingLatency = true
+        defer { isTestingLatency = false }
         do {
-            for group in store.snapshot.groups {
-                try await testServers(in: group.id)
+            try await tunnel.prepareForConnectivityTest(speed: false, snapshot: store.snapshot)
+            let targets = store.snapshot.groups.flatMap { group in
+                group.servers.map { (group.id, $0) }
+            }
+            try await withThrowingTaskGroup(of: (UUID, UUID, Int?).self) { taskGroup in
+                for (groupID, server) in targets {
+                    taskGroup.addTask {
+                        let result = try await tunnel.latencyTest(
+                            method: testConnectivityMethod.rawValue,
+                            servers: [server],
+                            snapshot: store.snapshot
+                        )[server.id]
+                        return (groupID, server.id, result?.latency)
+                    }
+                }
+                for try await (groupID, serverID, latency) in taskGroup {
+                    updateLatency(latency, groupID: groupID, serverID: serverID)
+                }
             }
         } catch {
             operationError = error.localizedDescription
         }
     }
 
-    private func connectivityIconRotation(at date: Date) -> Angle {
-        guard isTestingConnectivity else { return .zero }
+    private func testAllSpeeds() async {
+        guard !isTestingLatency, !isTestingSpeed else { return }
+        isTestingSpeed = true
+        defer { isTestingSpeed = false }
+        do {
+            try await tunnel.prepareForConnectivityTest(speed: true, snapshot: store.snapshot)
+            let targets = store.snapshot.groups.flatMap { group in
+                group.servers.map { (group.id, $0) }
+            }
+            // Downloads remain serial for an honest per-node result, but each
+            // completed node is published immediately.
+            for (groupID, server) in targets {
+                let result = try await tunnel.speedTest(servers: [server], snapshot: store.snapshot)[server.id]
+                updateSpeed(result?.speedMegabytesPerSecond, groupID: groupID, serverID: server.id)
+            }
+        } catch {
+            operationError = error.localizedDescription
+        }
+    }
+
+    private func testIconRotation(at date: Date, isActive: Bool) -> Angle {
+        guard isActive else { return .zero }
         let turns = date.timeIntervalSinceReferenceDate
             .truncatingRemainder(dividingBy: 0.8) / 0.8
         return .degrees(turns * 360)
     }
 
-    private func testServers(in groupID: UUID) async throws {
+    private func testLatencyServers(in groupID: UUID) async throws {
         guard let servers = store.snapshot.groups.first(where: { $0.id == groupID })?.servers else { return }
         let results = try await tunnel.latencyTest(
             method: testConnectivityMethod.rawValue,
@@ -485,7 +552,35 @@ struct MainView: View {
             guard let groupIndex = snapshot.groups.firstIndex(where: { $0.id == groupID }) else { return }
             for serverIndex in snapshot.groups[groupIndex].servers.indices {
                 let id = snapshot.groups[groupIndex].servers[serverIndex].id
-                snapshot.groups[groupIndex].servers[serverIndex].latencyMilliseconds = results[id]
+                snapshot.groups[groupIndex].servers[serverIndex].latencyMilliseconds = results[id]?.latency
+            }
+        }
+    }
+
+    private func updateLatency(_ latency: Int?, groupID: UUID, serverID: UUID) {
+        store.mutate { snapshot in
+            guard let groupIndex = snapshot.groups.firstIndex(where: { $0.id == groupID }),
+                  let serverIndex = snapshot.groups[groupIndex].servers.firstIndex(where: { $0.id == serverID }) else { return }
+            snapshot.groups[groupIndex].servers[serverIndex].latencyMilliseconds = latency
+        }
+    }
+
+    private func updateSpeed(_ speed: Double?, groupID: UUID, serverID: UUID) {
+        store.mutate { snapshot in
+            guard let groupIndex = snapshot.groups.firstIndex(where: { $0.id == groupID }),
+                  let serverIndex = snapshot.groups[groupIndex].servers.firstIndex(where: { $0.id == serverID }) else { return }
+            snapshot.groups[groupIndex].servers[serverIndex].speedMegabytesPerSecond = speed
+        }
+    }
+
+    private func testSpeedServers(in groupID: UUID) async throws {
+        guard let servers = store.snapshot.groups.first(where: { $0.id == groupID })?.servers else { return }
+        let results = try await tunnel.speedTest(servers: servers, snapshot: store.snapshot)
+        store.mutate { snapshot in
+            guard let groupIndex = snapshot.groups.firstIndex(where: { $0.id == groupID }) else { return }
+            for serverIndex in snapshot.groups[groupIndex].servers.indices {
+                let id = snapshot.groups[groupIndex].servers[serverIndex].id
+                snapshot.groups[groupIndex].servers[serverIndex].speedMegabytesPerSecond = results[id]?.speedMegabytesPerSecond
             }
         }
     }

@@ -14,6 +14,7 @@ struct ContentView: View {
     @Environment(TunnelController.self) private var tunnel
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("lastInspectedPasteboardChange") private var lastInspectedPasteboardChange = -1
+    @AppStorage("didRequestInitialNetworkAccess") private var didRequestInitialNetworkAccess = false
     @State private var isShowingClipboardImport = false
     @State private var clipboardImportError: String?
     var body: some View {
@@ -52,7 +53,13 @@ struct ContentView: View {
         } message: {
             Text(clipboardImportError ?? "Unable to import the subscription.")
         }
-        .task { await inspectClipboard() }
+        .task {
+            await requestInitialNetworkAccessIfNeeded()
+            await inspectClipboard()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .importSubscriptionFromClipboard)) { _ in
+            Task { await importClipboardSubscription() }
+        }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await inspectClipboard() }
@@ -78,6 +85,20 @@ struct ContentView: View {
         } catch {
             // Pattern detection can be unavailable under managed pasteboard policies.
         }
+    }
+
+    /// iOS does not expose a standalone API for its first-use network permission.
+    /// Starting a real request presents that system prompt on affected devices.
+    private func requestInitialNetworkAccessIfNeeded() async {
+        guard !didRequestInitialNetworkAccess else { return }
+        didRequestInitialNetworkAccess = true
+
+        guard let url = URL(string: "https://captive.apple.com/hotspot-detect.html") else { return }
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = 8
+        request.httpMethod = "HEAD"
+        _ = try? await URLSession.shared.data(for: request)
     }
 
     private func importClipboardSubscription() async {
@@ -131,6 +152,12 @@ struct ContentView: View {
             clipboardImportError = error.localizedDescription
         }
     }
+}
+
+extension Notification.Name {
+    static let importSubscriptionFromClipboard = Notification.Name(
+        "Dashstar.importSubscriptionFromClipboard"
+    )
 }
 
 private struct GlobalInteractionFeedback: ViewModifier {

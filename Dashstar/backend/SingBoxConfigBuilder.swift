@@ -20,13 +20,13 @@ struct SingBoxConfigBuilder {
         guard !allServers.isEmpty || snapshot.routingMode == .direct else {
             throw SingBoxConfigError.noProxyServer
         }
-        let servers = allServers.filter(isUsable)
+        let servers = allServers.filter(Self.isUsable)
         guard !servers.isEmpty || snapshot.routingMode == .direct else {
             throw SingBoxConfigError.noValidProxyServer
         }
 
-        let taggedServers = servers.map { server in
-            (server: server, tag: Self.outboundTag(for: server.id))
+        let taggedServers = servers.enumerated().map { index, server in
+            (server: server, tag: Self.outboundTag(for: server.id), probePort: 21_000 + index)
         }
         let serverTags = taggedServers.map(\.tag)
         let usableIDs = Set(servers.map(\.id))
@@ -50,6 +50,9 @@ struct SingBoxConfigBuilder {
             ["action": "sniff"],
             ["protocol": "dns", "action": "hijack-dns"],
         ]
+        rules.append(contentsOf: taggedServers.map {
+            ["inbound": ["probe-\($0.server.id.uuidString)"], "action": "route", "outbound": $0.tag]
+        })
         if snapshot.routingMode == .config,
            let config = snapshot.routeConfigs.first(where: { $0.id == snapshot.selectedConfigID })
                 ?? snapshot.routeConfigs.first {
@@ -110,6 +113,14 @@ struct SingBoxConfigBuilder {
             }
         }
 
+        let probeInbounds: [[String: Any]] = taggedServers.map {
+            [
+                "type": "mixed",
+                "tag": "probe-\($0.server.id.uuidString)",
+                "listen": "127.0.0.1",
+                "listen_port": $0.probePort,
+            ]
+        }
         let configuration: [String: Any] = [
             "log": ["level": "info", "timestamp": true],
             "dns": [
@@ -129,7 +140,7 @@ struct SingBoxConfigBuilder {
                 "tag": "tun-in",
                 "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
                 "auto_route": true,
-            ]],
+            ]] + probeInbounds,
             "outbounds": outbounds,
             "route": route,
             "experimental": [
@@ -149,6 +160,13 @@ struct SingBoxConfigBuilder {
 
     static func outboundTag(for serverID: UUID) -> String {
         "server-\(serverID.uuidString)"
+    }
+
+    static func probePortMap(from snapshot: ProxyAppSnapshot) -> [UUID: Int] {
+        let servers = snapshot.groups.flatMap(\.servers).filter(Self.isUsable)
+        return Dictionary(uniqueKeysWithValues: servers.enumerated().map { index, server in
+            (server.id, 21_000 + index)
+        })
     }
 
     private func outbound(_ server: StoredProxyServer, tag: String) -> [String: Any] {
@@ -229,7 +247,7 @@ struct SingBoxConfigBuilder {
         return [field: [value], "action": "route", "outbound": rule.target.rawValue]
     }
 
-    private func isUsable(_ server: StoredProxyServer) -> Bool {
+    nonisolated private static func isUsable(_ server: StoredProxyServer) -> Bool {
         guard !server.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               (1...65_535).contains(server.port) else { return false }
         switch server.type {
