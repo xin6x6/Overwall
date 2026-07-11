@@ -29,21 +29,32 @@ private enum AddProxyDestination: String, Identifiable {
 }
 
 struct MainView: View {
-    @State private var isOnVPN = false // Toggle VPN
+    @Environment(ProxyStore.self) private var store
+    @Environment(TunnelController.self) private var tunnel
     @State private var routing: Routing = .config // Routing method
     @State private var testConnectivityMethod: TCM = .tcp
     @State private var addDestination: AddProxyDestination?
-    @State private var groups = [ProxyGroupOption(name: "Default")]
+    @State private var editingGroup: StoredProxyGroup?
+    @State private var groupPendingDeletion: StoredProxyGroup?
+    @State private var operationError: String?
+    @State private var isTestingConnectivity = false
+    @State private var refreshingGroupIDs: Set<UUID> = []
     
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
                 // Head
-                Form {
+                Form(
+                    height: 164,
+                    verticalContentMargin: 4,
+                    allowsScrolling: false
+                ) {
                     // Toggle VPN
-                Toggle(isOn: $isOnVPN) {
-                    Label("Toggle VPN", systemImage: isOnVPN ? "shield.fill" : "shield.slash")
+                Toggle(isOn: vpnBinding) {
+                    Label("Toggle VPN", systemImage: tunnel.isConnected ? "shield.fill" : "shield.slash")
                 }
+                .disabled(tunnel.isBusy)
                 
                     // Routing
                 Picker(selection: $routing) {
@@ -52,6 +63,10 @@ struct MainView: View {
                     Text("Direct").tag(Routing.direct)
                 } label : {
                     Label("Routing", systemImage: routing == .config ? "arrow.branch" : (routing == .direct ? "arrow.left.and.right" : "globe"))
+                }
+                .onChange(of: routing) { _, mode in
+                    store.mutate { $0.routingMode = StoredRoutingMode(rawValue: mode.rawValue) ?? .config }
+                    Task { await tunnel.reload(snapshot: store.snapshot) }
                 }
                 
                     // Test Connectivity
@@ -63,23 +78,38 @@ struct MainView: View {
                     Label("Test Connectivity", systemImage: "arrow.2.circlepath")
                         .simultaneousGesture(
                             TapGesture().onEnded {
-                                    // Test Connectivity Code
+                                Task { await testAllServers() }
                             }
                         )
                 }
+                .disabled(isTestingConnectivity)
                 }
+                .environment(\.defaultMinListRowHeight, 52)
                 .padding(.bottom, 50)
             
                 // Body
-                ForEach(groups) { group in
-                    CollapsibleForm(LocalizedStringKey(group.name), onEdit: {}) {
-                    
+                ForEach(store.snapshot.groups) { group in
+                    CollapsibleForm(
+                        LocalizedStringKey(group.name),
+                        expandedHeight: CGFloat(group.servers.count + 1) * 52,
+                        onRefresh: { Task { await refreshGroup(group.id) } },
+                        onDelete: { groupPendingDeletion = group },
+                        onEdit: { editingGroup = group }
+                    ) {
+                        ForEach(group.servers) { server in
+                            ProxyBar(
+                                node: proxyBinding(groupID: group.id, serverID: server.id),
+                                isSelected: group.selectedServerID == server.id,
+                                onDelete: { deleteServer(groupID: group.id, serverID: server.id) },
+                                onCommit: { Task { await tunnel.reload(snapshot: store.snapshot) } }
+                            ) {
+                                selectServer(groupID: group.id, serverID: server.id)
+                            }
+                        }
                     }
                 }
+                }
             }
-            
-            
-            
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .navigationTitle("Main")
             .navigationBarTitleDisplayMode(.inline)
@@ -107,28 +137,345 @@ struct MainView: View {
                 NavigationStack {
                     switch destination {
                     case .server:
-                        AddServerView(groups: groups)
+                        AddServerView(groups: groupOptions) { addServer($0) }
                     case .group:
                         AddGroupView { draft in
                             let subscriptionURL = draft.subscriptionURL
                                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-                            groups.append(
-                                ProxyGroupOption(
+                            store.mutate { snapshot in
+                                let group = StoredProxyGroup(
                                     name: draft.resolvedName,
                                     subscriptionURL: subscriptionURL.isEmpty ? nil : subscriptionURL
                                 )
-                            )
+                                snapshot.groups.append(group)
+                            }
+                            if !subscriptionURL.isEmpty,
+                               let groupID = store.snapshot.groups.last?.id {
+                                Task { await refreshGroup(groupID) }
+                            }
                         }
                     }
                 }
                 .presentationDetents([.large])
             }
+            .sheet(item: $editingGroup) { group in
+                NavigationStack {
+                    EditGroupView(group: group) { id, name, subscriptionURL in
+                        store.mutate { snapshot in
+                            guard let index = snapshot.groups.firstIndex(where: { $0.id == id }) else { return }
+                            snapshot.groups[index].name = name
+                            snapshot.groups[index].subscriptionURL = subscriptionURL
+                        }
+                        if subscriptionURL != nil {
+                            Task { await refreshGroup(id) }
+                        } else {
+                            Task { await tunnel.reload(snapshot: store.snapshot) }
+                        }
+                    }
+                }
+            }
+            .alert("Overwall", isPresented: errorBinding) {
+                Button("OK") {
+                    tunnel.lastError = nil
+                    operationError = nil
+                }
+            } message: {
+                Text(tunnel.lastError ?? operationError ?? "Unknown error")
+            }
+            .confirmationDialog(
+                "Delete Group?",
+                isPresented: deleteGroupConfirmationBinding,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    guard let group = groupPendingDeletion else { return }
+                    deleteGroup(group.id)
+                    groupPendingDeletion = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    groupPendingDeletion = nil
+                }
+            } message: {
+                Text("Deleting \(groupPendingDeletion?.name ?? "this group") will also delete all of its proxy nodes.")
+            }
+            .onAppear {
+                routing = Routing(rawValue: store.snapshot.routingMode.rawValue) ?? .config
+            }
         }
+    }
+
+    private var vpnBinding: Binding<Bool> {
+        Binding(
+            get: { tunnel.isConnected },
+            set: { enabled in
+                Task { await tunnel.setEnabled(enabled, snapshot: store.snapshot) }
+            }
+        )
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { tunnel.lastError != nil || operationError != nil },
+            set: {
+                if !$0 {
+                    tunnel.lastError = nil
+                    operationError = nil
+                }
+            }
+        )
+    }
+
+    private var deleteGroupConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { groupPendingDeletion != nil },
+            set: { if !$0 { groupPendingDeletion = nil } }
+        )
+    }
+
+    private var groupOptions: [ProxyGroupOption] {
+        store.snapshot.groups.map { ProxyGroupOption(id: $0.id, name: $0.name, subscriptionURL: $0.subscriptionURL) }
+    }
+
+    private func addServer(_ draft: ServerDraft) {
+        guard let groupID = draft.groupID, let port = Int(draft.port) else { return }
+        store.mutate { snapshot in
+            guard let index = snapshot.groups.firstIndex(where: { $0.id == groupID }) else { return }
+            let server = StoredProxyServer(
+                groupID: groupID,
+                name: draft.name.isEmpty ? draft.address : draft.name,
+                type: ProxyProtocolKind(rawValue: draft.type.rawValue.lowercased()) ?? .shadowsocks,
+                address: draft.address,
+                port: port,
+                password: draft.password,
+                method: draft.method,
+                userID: draft.userID,
+                alterID: Int(draft.alterID) ?? 0,
+                security: draft.security,
+                transport: draft.transport,
+                tlsMode: draft.tlsMode,
+                serverName: draft.serverName,
+                host: draft.host,
+                path: draft.path,
+                flow: draft.flow,
+                realityPublicKey: draft.realityPublicKey,
+                realityShortID: draft.realityShortID,
+                allowInsecure: draft.allowInsecure
+            )
+            snapshot.groups[index].servers.append(server)
+            if !snapshot.groups.contains(where: { $0.selectedServerID != nil }) {
+                snapshot.groups[index].selectedServerID = server.id
+            }
+        }
+        Task { await tunnel.reload(snapshot: store.snapshot) }
+    }
+
+    private func proxyBinding(groupID: UUID, serverID: UUID) -> Binding<ProxyNode> {
+        Binding {
+            let server = store.snapshot.groups.first(where: { $0.id == groupID })?.servers.first(where: { $0.id == serverID })
+            return ProxyNode(
+                id: serverID,
+                countryCode: server?.countryCode ?? "",
+                name: server?.name ?? "",
+                server: server?.address ?? "",
+                port: server?.port ?? 443,
+                protocolName: server?.type.rawValue ?? "shadowsocks",
+                password: server?.password ?? "",
+                method: server?.method ?? "",
+                userID: server?.userID ?? "",
+                alterID: server?.alterID ?? 0,
+                security: server?.security ?? "auto",
+                transport: server?.transport ?? "tcp",
+                tlsMode: server?.tlsMode ?? "none",
+                serverName: server?.serverName ?? "",
+                host: server?.host ?? "",
+                path: server?.path ?? "",
+                flow: server?.flow ?? "",
+                realityPublicKey: server?.realityPublicKey ?? "",
+                realityShortID: server?.realityShortID ?? "",
+                allowInsecure: server?.allowInsecure ?? false,
+                latencyMilliseconds: server?.latencyMilliseconds,
+                speedMegabytesPerSecond: server?.speedMegabytesPerSecond
+            )
+        } set: { node in
+            store.mutate { snapshot in
+                guard let group = snapshot.groups.firstIndex(where: { $0.id == groupID }), let server = snapshot.groups[group].servers.firstIndex(where: { $0.id == serverID }) else { return }
+                snapshot.groups[group].servers[server].name = node.name
+                snapshot.groups[group].servers[server].countryCode = node.countryCode
+                snapshot.groups[group].servers[server].address = node.server
+                snapshot.groups[group].servers[server].port = node.port
+                snapshot.groups[group].servers[server].type = ProxyProtocolKind(rawValue: node.protocolName.lowercased()) ?? .shadowsocks
+                snapshot.groups[group].servers[server].password = node.password
+                snapshot.groups[group].servers[server].method = node.method
+                snapshot.groups[group].servers[server].userID = node.userID
+                snapshot.groups[group].servers[server].alterID = node.alterID
+                snapshot.groups[group].servers[server].security = node.security
+                snapshot.groups[group].servers[server].transport = node.transport
+                snapshot.groups[group].servers[server].tlsMode = node.tlsMode
+                snapshot.groups[group].servers[server].serverName = node.serverName
+                snapshot.groups[group].servers[server].host = node.host
+                snapshot.groups[group].servers[server].path = node.path
+                snapshot.groups[group].servers[server].flow = node.flow
+                snapshot.groups[group].servers[server].realityPublicKey = node.realityPublicKey
+                snapshot.groups[group].servers[server].realityShortID = node.realityShortID
+                snapshot.groups[group].servers[server].allowInsecure = node.allowInsecure
+            }
+        }
+    }
+
+    private func selectServer(groupID: UUID, serverID: UUID) {
+        store.mutate { snapshot in
+            for groupIndex in snapshot.groups.indices {
+                snapshot.groups[groupIndex].selectedServerID = nil
+            }
+            guard let index = snapshot.groups.firstIndex(where: { $0.id == groupID }) else { return }
+            snapshot.groups[index].selectedServerID = serverID
+        }
+        Task { await tunnel.reload(snapshot: store.snapshot) }
+    }
+
+    private func deleteServer(groupID: UUID, serverID: UUID) {
+        store.mutate { snapshot in
+            guard let index = snapshot.groups.firstIndex(where: { $0.id == groupID }) else { return }
+            snapshot.groups[index].servers.removeAll { $0.id == serverID }
+            if snapshot.groups[index].selectedServerID == serverID { snapshot.groups[index].selectedServerID = snapshot.groups[index].servers.first?.id }
+        }
+        Task { await tunnel.reload(snapshot: store.snapshot) }
+    }
+
+    private func deleteGroup(_ groupID: UUID) {
+        store.mutate { snapshot in
+            snapshot.groups.removeAll { $0.id == groupID }
+            let removedConfigIDs = Set(
+                snapshot.routeConfigs
+                    .filter { $0.sourceGroupID == groupID }
+                    .map(\.id)
+            )
+            snapshot.routeConfigs.removeAll { $0.sourceGroupID == groupID }
+            if let selectedConfigID = snapshot.selectedConfigID,
+               removedConfigIDs.contains(selectedConfigID) {
+                snapshot.selectedConfigID = snapshot.routeConfigs.first?.id
+            }
+        }
+        Task { await tunnel.reload(snapshot: store.snapshot) }
+    }
+
+    private func refreshGroup(_ groupID: UUID) async {
+        guard !refreshingGroupIDs.contains(groupID),
+              let group = store.snapshot.groups.first(where: { $0.id == groupID }) else { return }
+        refreshingGroupIDs.insert(groupID)
+        defer { refreshingGroupIDs.remove(groupID) }
+
+        do {
+            if let subscriptionURL = group.subscriptionURL, !subscriptionURL.isEmpty {
+                let subscription = try await SubscriptionService().fetchGroupSubscription(
+                    from: subscriptionURL,
+                    groupID: groupID
+                )
+                var imported = subscription.servers
+                let oldServers = group.servers
+                var reusableServers = Dictionary(grouping: oldServers, by: serverIdentity)
+                for index in imported.indices {
+                    let identity = serverIdentity(imported[index])
+                    if var matches = reusableServers[identity], !matches.isEmpty {
+                        let old = matches.removeFirst()
+                        reusableServers[identity] = matches
+                        imported[index].id = old.id
+                        imported[index].latencyMilliseconds = old.latencyMilliseconds
+                        imported[index].speedMegabytesPerSecond = old.speedMegabytesPerSecond
+                    }
+                }
+                store.mutate { snapshot in
+                    guard let index = snapshot.groups.firstIndex(where: { $0.id == groupID }) else { return }
+                    let selected = snapshot.groups[index].selectedServerID
+                    let anotherGroupIsSelected = snapshot.groups.contains {
+                        $0.id != groupID && $0.selectedServerID != nil
+                    }
+                    snapshot.groups[index].servers = imported
+                    snapshot.groups[index].selectedServerID = imported.contains(where: { $0.id == selected })
+                        ? selected : (anotherGroupIsSelected ? nil : imported.first?.id)
+
+                    if let importedConfig = subscription.routeConfig {
+                        if let configIndex = snapshot.routeConfigs.firstIndex(where: {
+                            $0.sourceGroupID == groupID
+                        }) {
+                            snapshot.routeConfigs[configIndex].subscriptionURL = subscriptionURL
+                            snapshot.routeConfigs[configIndex].rules = importedConfig.rules
+                            snapshot.routeConfigs[configIndex].remoteRuleSets = importedConfig.remoteRuleSets
+                        } else {
+                            let config = StoredRouteConfig(
+                                name: "\(snapshot.groups[index].name) Default",
+                                subscriptionURL: subscriptionURL,
+                                rules: importedConfig.rules,
+                                remoteRuleSets: importedConfig.remoteRuleSets,
+                                sourceGroupID: groupID
+                            )
+                            snapshot.routeConfigs.append(config)
+                            if snapshot.selectedConfigID == nil {
+                                snapshot.selectedConfigID = config.id
+                            }
+                        }
+                    } else {
+                        let removedConfigIDs = Set(
+                            snapshot.routeConfigs
+                                .filter { $0.sourceGroupID == groupID }
+                                .map(\.id)
+                        )
+                        snapshot.routeConfigs.removeAll { $0.sourceGroupID == groupID }
+                        if let selectedConfigID = snapshot.selectedConfigID,
+                           removedConfigIDs.contains(selectedConfigID) {
+                            snapshot.selectedConfigID = snapshot.routeConfigs.first?.id
+                        }
+                    }
+                }
+            }
+            await testServers(in: groupID)
+            await tunnel.reload(snapshot: store.snapshot)
+        } catch {
+            operationError = error.localizedDescription
+        }
+    }
+
+    private func testAllServers() async {
+        guard !isTestingConnectivity else { return }
+        isTestingConnectivity = true
+        defer { isTestingConnectivity = false }
+        for group in store.snapshot.groups {
+            await testServers(in: group.id)
+        }
+    }
+
+    private func testServers(in groupID: UUID) async {
+        guard let servers = store.snapshot.groups.first(where: { $0.id == groupID })?.servers else { return }
+        let results = await withTaskGroup(of: (UUID, Int?).self, returning: [UUID: Int].self) { group in
+            for server in servers {
+                group.addTask {
+                    (server.id, await ConnectivityService().latency(to: server))
+                }
+            }
+            var values: [UUID: Int] = [:]
+            for await (id, latency) in group { values[id] = latency ?? -1 }
+            return values
+        }
+        store.mutate { snapshot in
+            guard let groupIndex = snapshot.groups.firstIndex(where: { $0.id == groupID }) else { return }
+            for serverIndex in snapshot.groups[groupIndex].servers.indices {
+                let id = snapshot.groups[groupIndex].servers[serverIndex].id
+                if let result = results[id] {
+                    snapshot.groups[groupIndex].servers[serverIndex].latencyMilliseconds = result >= 0 ? result : nil
+                }
+            }
+        }
+    }
+
+    private func serverIdentity(_ server: StoredProxyServer) -> String {
+        "\(server.type.rawValue)|\(server.address)|\(server.port)|\(server.userID)|\(server.method)"
     }
 }
 
 
 #Preview {
     ContentView()
+        .environment(ProxyStore())
+        .environment(TunnelController())
 }

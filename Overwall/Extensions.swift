@@ -20,6 +20,8 @@ struct Form<Content: View>: View {
     private let content: Content
     private let heightOverride: CGFloat?
     private let verticalContentMargin: CGFloat
+    private let horizontalContentMargin: CGFloat
+    private let allowsScrolling: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fittedHeight: CGFloat?
     @State private var maximumHeight: CGFloat?
@@ -27,10 +29,14 @@ struct Form<Content: View>: View {
     init(
         height: CGFloat? = nil,
         verticalContentMargin: CGFloat = 8,
+        horizontalContentMargin: CGFloat = 16,
+        allowsScrolling: Bool = true,
         @ViewBuilder content: () -> Content
     ) {
         self.heightOverride = height
         self.verticalContentMargin = verticalContentMargin
+        self.horizontalContentMargin = horizontalContentMargin
+        self.allowsScrolling = allowsScrolling
         self.content = content()
         self._fittedHeight = State(initialValue: height)
     }
@@ -43,7 +49,9 @@ struct Form<Content: View>: View {
                 .listRowBackground(Color.clear)
         }
         .scrollContentBackground(.hidden)
+        .scrollDisabled(!allowsScrolling)
         .contentMargins(.vertical, verticalContentMargin, for: .scrollContent)
+        .contentMargins(.horizontal, horizontalContentMargin, for: .scrollContent)
         .background(Color.clear)
         .clipShape(shape)
         .onScrollGeometryChange(for: FormScrollMetrics.self) { geometry in
@@ -83,7 +91,9 @@ struct Form<Content: View>: View {
         }
 
         let availableHeight = maximumHeight ?? metrics.containerHeight
-        let nextHeight = min(metrics.contentHeight, availableHeight)
+        let nextHeight = allowsScrolling
+            ? min(metrics.contentHeight, availableHeight)
+            : metrics.contentHeight
 
         if fittedHeight == nil || abs((fittedHeight ?? 0) - nextHeight) > 0.5 {
             if fittedHeight == nil || reduceMotion {

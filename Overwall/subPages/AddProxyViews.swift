@@ -370,6 +370,57 @@ struct AddGroupView: View {
     }
 }
 
+struct EditGroupView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var subscriptionURL: String
+    let groupID: UUID
+    let onSave: (UUID, String, String?) -> Void
+
+    init(group: StoredProxyGroup, onSave: @escaping (UUID, String, String?) -> Void) {
+        groupID = group.id
+        _name = State(initialValue: group.name)
+        _subscriptionURL = State(initialValue: group.subscriptionURL ?? "")
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        SwiftUI.Form {
+            Section("Group") {
+                TextField("Group Name", text: $name)
+                TextField("Subscribe URL (Optional)", text: $subscriptionURL)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+        }
+        .navigationTitle("Edit Group")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    let url = subscriptionURL.trimmed
+                    onSave(groupID, name.trimmed, url.isEmpty ? nil : url)
+                    dismiss()
+                }
+                .disabled(name.trimmed.isEmpty || !subscriptionURLIsValid)
+            }
+        }
+    }
+
+    private var subscriptionURLIsValid: Bool {
+        let value = subscriptionURL.trimmed
+        guard !value.isEmpty else { return true }
+        guard let components = URLComponents(string: value),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return false }
+        return components.host?.isEmpty == false
+    }
+}
+
 private extension String {
     var trimmed: String {
         trimmingCharacters(in: .whitespacesAndNewlines)

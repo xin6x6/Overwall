@@ -10,10 +10,22 @@ import SwiftUI
 struct ConfigProfile: Identifiable, Hashable {
     let id: UUID
     var name: String
+    var subscriptionURL: String = ""
+    var rules: [StoredRouteRule] = []
+    var remoteRuleSets: [StoredRemoteRuleSet] = []
 
-    init(id: UUID = UUID(), name: String) {
+    init(
+        id: UUID = UUID(),
+        name: String,
+        subscriptionURL: String = "",
+        rules: [StoredRouteRule] = [],
+        remoteRuleSets: [StoredRemoteRuleSet] = []
+    ) {
         self.id = id
         self.name = name
+        self.subscriptionURL = subscriptionURL
+        self.rules = rules
+        self.remoteRuleSets = remoteRuleSets
     }
 }
 
@@ -24,17 +36,23 @@ struct ConfigBar: View {
 
     private let isSelected: Bool
     private let onDelete: () -> Void
+    private let onRefresh: () -> Void
+    private let onCommit: () -> Void
     private let onSelect: () -> Void
 
     init(
         config: Binding<ConfigProfile>,
         isSelected: Bool,
         onDelete: @escaping () -> Void = {},
+        onRefresh: @escaping () -> Void = {},
+        onCommit: @escaping () -> Void = {},
         onSelect: @escaping () -> Void
     ) {
         self._config = config
         self.isSelected = isSelected
         self.onDelete = onDelete
+        self.onRefresh = onRefresh
+        self.onCommit = onCommit
         self.onSelect = onSelect
     }
 
@@ -57,6 +75,16 @@ struct ConfigBar: View {
             .buttonStyle(.plain)
             .accessibilityLabel(config.name)
             .accessibilityValue(isSelected ? "Selected" : "Not selected")
+
+            Button(action: onRefresh) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Refresh \(config.name)")
 
             Button {
                 isEditing = true
@@ -92,19 +120,80 @@ struct ConfigBar: View {
             Text("Are you sure you want to delete \(config.name)? This action cannot be undone.")
         }
         .navigationDestination(isPresented: $isEditing) {
-            ConfigEditorView(config: $config)
+            ConfigEditorView(config: $config, onCommit: onCommit)
         }
     }
 }
 
 struct ConfigEditorView: View {
     @Binding var config: ConfigProfile
+    var onCommit: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         SwiftUI.Form {
             Section("Config") {
                 TextField("Name", text: $config.name)
+                TextField("Subscribe URL (Optional)", text: $config.subscriptionURL)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+
+            Section("Routing Rules") {
+                ForEach($config.rules) { $rule in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Picker("Match", selection: $rule.matchKind) {
+                                ForEach(RouteMatchKind.allCases) { Text($0.rawValue).tag($0) }
+                            }
+                            Picker("Route", selection: $rule.target) {
+                                ForEach(RouteTarget.allCases) { Text($0.rawValue.capitalized).tag($0) }
+                            }
+                        }
+                        TextField("Domain, CIDR, or rule-set tag", text: $rule.value)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Toggle("Enabled", isOn: $rule.enabled)
+                    }
+                }
+                .onDelete { config.rules.remove(atOffsets: $0) }
+
+                Button {
+                    config.rules.append(StoredRouteRule(matchKind: .domainSuffix, value: "", target: .proxy))
+                } label: {
+                    Label("Add Rule", systemImage: "plus")
+                }
+            }
+
+            Section("Remote Rule Sets") {
+                ForEach($config.remoteRuleSets) { $ruleSet in
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Tag", text: $ruleSet.tag)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("URL", text: $ruleSet.url)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        HStack {
+                            Picker("Format", selection: $ruleSet.format) {
+                                Text("Binary").tag("binary")
+                                Text("Source JSON").tag("source")
+                            }
+                            TextField("Update", text: $ruleSet.updateInterval)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                    }
+                }
+                .onDelete { config.remoteRuleSets.remove(atOffsets: $0) }
+
+                Button {
+                    config.remoteRuleSets.append(StoredRemoteRuleSet(tag: "", url: ""))
+                } label: {
+                    Label("Add Remote Rule Set", systemImage: "plus")
+                }
             }
         }
         .navigationTitle("Edit Config")
@@ -112,6 +201,7 @@ struct ConfigEditorView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") {
+                    onCommit()
                     dismiss()
                 }
                 .disabled(config.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

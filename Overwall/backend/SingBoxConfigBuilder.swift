@@ -1,0 +1,222 @@
+import Foundation
+
+enum SingBoxConfigError: LocalizedError {
+    case noProxyServer
+    case noValidProxyServer
+
+    var errorDescription: String? {
+        switch self {
+        case .noProxyServer:
+            "Add and select at least one proxy server before starting the VPN."
+        case .noValidProxyServer:
+            "No valid proxy server is available. Check the selected server's address, port and authentication fields."
+        }
+    }
+}
+
+struct SingBoxConfigBuilder {
+    func build(from snapshot: ProxyAppSnapshot) throws -> String {
+        let allServers = snapshot.groups.flatMap(\.servers)
+        guard !allServers.isEmpty || snapshot.routingMode == .direct else {
+            throw SingBoxConfigError.noProxyServer
+        }
+        let servers = allServers.filter(isUsable)
+        guard !servers.isEmpty || snapshot.routingMode == .direct else {
+            throw SingBoxConfigError.noValidProxyServer
+        }
+
+        let taggedServers = servers.enumerated().map { index, server in
+            (server: server, tag: "server-\(server.id.uuidString)-\(index)")
+        }
+        let serverTags = taggedServers.map(\.tag)
+        let usableIDs = Set(servers.map(\.id))
+        let selectedID = snapshot.groups.compactMap(\.selectedServerID).first(where: usableIDs.contains)
+        let selectedTag = selectedID.flatMap { selectedID in
+            taggedServers.first(where: { $0.server.id == selectedID })?.tag
+        } ?? serverTags.first
+
+        var outbounds = taggedServers.map { outbound($0.server, tag: $0.tag) }
+        if !serverTags.isEmpty {
+            outbounds.insert([
+                "type": "selector",
+                "tag": "proxy",
+                "outbounds": serverTags,
+                "default": selectedTag as Any,
+            ], at: 0)
+        }
+        outbounds.append(["type": "direct", "tag": "direct"])
+
+        var rules: [[String: Any]] = [
+            ["action": "sniff"],
+            ["protocol": "dns", "action": "hijack-dns"],
+        ]
+        if snapshot.routingMode == .config,
+           let config = snapshot.routeConfigs.first(where: { $0.id == snapshot.selectedConfigID })
+                ?? snapshot.routeConfigs.first {
+            let ruleSetTags = Set((config.remoteRuleSets ?? []).map(\.tag))
+            rules.append(contentsOf: config.rules.filter {
+                $0.enabled
+                    && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && ($0.matchKind != .ruleSet || ruleSetTags.contains($0.value))
+            }.map(routeRule))
+        }
+
+        let finalOutbound: String
+        switch snapshot.routingMode {
+        case .direct: finalOutbound = "direct"
+        case .config, .global: finalOutbound = serverTags.isEmpty ? "direct" : "proxy"
+        }
+
+        var route: [String: Any] = [
+            "rules": rules,
+            "final": finalOutbound,
+            // Resolve proxy server hostnames without entering the proxy first.
+            "default_domain_resolver": ["server": "local"],
+        ]
+        if snapshot.routingMode == .config,
+           let config = snapshot.routeConfigs.first(where: { $0.id == snapshot.selectedConfigID })
+                ?? snapshot.routeConfigs.first {
+            let remoteRuleSets = (config.remoteRuleSets ?? []).filter {
+                !$0.tag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && URL(string: $0.url)?.scheme != nil
+            }
+            if !remoteRuleSets.isEmpty {
+                route["rule_set"] = remoteRuleSets.map { ruleSet in
+                    [
+                        "type": "remote",
+                        "tag": ruleSet.tag,
+                        "format": ruleSet.format,
+                        "url": ruleSet.url,
+                        "download_detour": finalOutbound,
+                        "update_interval": ruleSet.updateInterval,
+                    ]
+                }
+            }
+        }
+
+        let configuration: [String: Any] = [
+            "log": ["level": "info", "timestamp": true],
+            "dns": [
+                "servers": [
+                    ["type": "local", "tag": "local"],
+                    [
+                        "type": "https",
+                        "tag": "remote",
+                        "server": "1.1.1.1",
+                        "detour": finalOutbound,
+                    ],
+                ],
+                "final": finalOutbound == "direct" ? "local" : "remote",
+            ],
+            "inbounds": [[
+                "type": "tun",
+                "tag": "tun-in",
+                "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+                "auto_route": true,
+            ]],
+            "outbounds": outbounds,
+            "route": route,
+        ]
+
+        let data = try JSONSerialization.data(
+            withJSONObject: configuration,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private func outbound(_ server: StoredProxyServer, tag: String) -> [String: Any] {
+        var result: [String: Any] = [
+            "type": server.type.rawValue,
+            "tag": tag,
+            "server": server.address,
+            "server_port": server.port,
+        ]
+
+        switch server.type {
+        case .shadowsocks:
+            result["method"] = server.method
+            result["password"] = server.password
+        case .vmess:
+            result["uuid"] = server.userID
+            result["security"] = server.security
+            result["alter_id"] = server.alterID
+        case .vless:
+            result["uuid"] = server.userID
+            if !server.flow.isEmpty && server.flow != "none" { result["flow"] = server.flow }
+        }
+
+        let transportType = normalizedTransport(server.transport)
+        if transportType != "tcp" {
+            var transport: [String: Any] = ["type": transportType]
+            if !server.path.isEmpty {
+                transport[transportType == "grpc" ? "service_name" : "path"] = server.path
+            }
+            if !server.host.isEmpty { transport["headers"] = ["Host": server.host] }
+            result["transport"] = transport
+        }
+
+        if server.tlsMode != "none" {
+            var tls: [String: Any] = [
+                "enabled": true,
+                "server_name": server.serverName.isEmpty ? server.address : server.serverName,
+                "insecure": server.allowInsecure,
+            ]
+            if server.tlsMode == "reality" {
+                tls["reality"] = [
+                    "enabled": true,
+                    "public_key": server.realityPublicKey,
+                    "short_id": server.realityShortID,
+                ]
+            }
+            let fingerprint = server.utlsFingerprint?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if server.tlsMode == "reality" || !fingerprint.isEmpty {
+                tls["utls"] = [
+                    "enabled": true,
+                    "fingerprint": fingerprint.isEmpty ? "chrome" : fingerprint,
+                ]
+            }
+            result["tls"] = tls
+        }
+        return result
+    }
+
+    private func routeRule(_ rule: StoredRouteRule) -> [String: Any] {
+        let field: String
+        switch rule.matchKind {
+        case .domain: field = "domain"
+        case .domainSuffix: field = "domain_suffix"
+        case .domainKeyword: field = "domain_keyword"
+        case .ipCIDR: field = "ip_cidr"
+        case .ruleSet: field = "rule_set"
+        }
+        if rule.target == .block {
+            return [field: [rule.value], "action": "reject"]
+        }
+        return [field: [rule.value], "action": "route", "outbound": rule.target.rawValue]
+    }
+
+    private func isUsable(_ server: StoredProxyServer) -> Bool {
+        guard !server.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              (1...65_535).contains(server.port) else { return false }
+        switch server.type {
+        case .shadowsocks:
+            return !server.method.isEmpty && !server.password.isEmpty
+        case .vmess, .vless:
+            guard UUID(uuidString: server.userID) != nil else { return false }
+            if server.tlsMode == "reality" {
+                return !server.realityPublicKey.isEmpty
+            }
+            return true
+        }
+    }
+
+    private func normalizedTransport(_ transport: String) -> String {
+        switch transport.lowercased() {
+        case "h2": "http"
+        case "websocket": "ws"
+        default: transport.lowercased()
+        }
+    }
+}

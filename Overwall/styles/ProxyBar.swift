@@ -14,6 +14,20 @@ struct ProxyNode: Identifiable, Hashable {
     var server: String
     var port: Int
     var protocolName: String
+    var password: String
+    var method: String
+    var userID: String
+    var alterID: Int
+    var security: String
+    var transport: String
+    var tlsMode: String
+    var serverName: String
+    var host: String
+    var path: String
+    var flow: String
+    var realityPublicKey: String
+    var realityShortID: String
+    var allowInsecure: Bool
     var latencyMilliseconds: Int?
     var speedMegabytesPerSecond: Double?
 
@@ -24,6 +38,20 @@ struct ProxyNode: Identifiable, Hashable {
         server: String = "",
         port: Int = 443,
         protocolName: String = "Shadowsocks",
+        password: String = "",
+        method: String = "",
+        userID: String = "",
+        alterID: Int = 0,
+        security: String = "auto",
+        transport: String = "tcp",
+        tlsMode: String = "none",
+        serverName: String = "",
+        host: String = "",
+        path: String = "",
+        flow: String = "",
+        realityPublicKey: String = "",
+        realityShortID: String = "",
+        allowInsecure: Bool = false,
         latencyMilliseconds: Int? = nil,
         speedMegabytesPerSecond: Double? = nil
     ) {
@@ -33,6 +61,20 @@ struct ProxyNode: Identifiable, Hashable {
         self.server = server
         self.port = port
         self.protocolName = protocolName
+        self.password = password
+        self.method = method
+        self.userID = userID
+        self.alterID = alterID
+        self.security = security
+        self.transport = transport
+        self.tlsMode = tlsMode
+        self.serverName = serverName
+        self.host = host
+        self.path = path
+        self.flow = flow
+        self.realityPublicKey = realityPublicKey
+        self.realityShortID = realityShortID
+        self.allowInsecure = allowInsecure
         self.latencyMilliseconds = latencyMilliseconds
         self.speedMegabytesPerSecond = speedMegabytesPerSecond
     }
@@ -44,35 +86,38 @@ struct ProxyBar: View {
     @State private var isConfirmingDeletion = false
     private let isSelected: Bool
     private let onDelete: () -> Void
+    private let onCommit: () -> Void
     private let onSelect: () -> Void
 
     init(
         node: Binding<ProxyNode>,
         isSelected: Bool,
         onDelete: @escaping () -> Void = {},
+        onCommit: @escaping () -> Void = {},
         onSelect: @escaping () -> Void
     ) {
         self._node = node
         self.isSelected = isSelected
         self.onDelete = onDelete
+        self.onCommit = onCommit
         self.onSelect = onSelect
     }
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             Button(action: onSelect) {
-                HStack(spacing: 8) {
+                HStack(spacing: 5) {
                     countryIcon
 
                     Text(node.name)
-                        .font(.headline.weight(isSelected ? .bold : .semibold))
+                        .font(.subheadline.weight(isSelected ? .bold : .semibold))
                         .foregroundStyle(isSelected ? selectedHighlightColor : Color.primary)
                         .shadow(
                             color: isSelected ? selectedHighlightColor.opacity(0.25) : .clear,
                             radius: isSelected ? 5 : 0
                         )
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.58)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     connectionMetrics
@@ -96,7 +141,7 @@ struct ProxyBar: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Edit \(node.name)")
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 2)
         .frame(maxWidth: .infinity)
         .frame(height: 52)
         .animation(.smooth(duration: 0.22), value: isSelected)
@@ -118,7 +163,7 @@ struct ProxyBar: View {
             Text("Are you sure you want to delete \(node.name)? This action cannot be undone.")
         }
         .navigationDestination(isPresented: $isEditing) {
-            ProxyNodeEditorView(node: $node)
+            ProxyNodeEditorView(node: $node, onCommit: onCommit)
         }
     }
 
@@ -202,6 +247,7 @@ struct ProxyBar: View {
 
 struct ProxyNodeEditorView: View {
     @Binding var node: ProxyNode
+    var onCommit: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -222,9 +268,59 @@ struct ProxyNodeEditorView: View {
                 TextField("Port", value: $node.port, format: .number)
                     .keyboardType(.numberPad)
 
-                TextField("Protocol", text: $node.protocolName)
+                Picker("Protocol", selection: $node.protocolName) {
+                    Text("Shadowsocks").tag("shadowsocks")
+                    Text("VMess").tag("vmess")
+                    Text("VLESS").tag("vless")
+                }
+            }
+
+            Section("Authentication") {
+                if node.protocolName.lowercased() == "shadowsocks" {
+                    TextField("Method", text: $node.method)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("Password", text: $node.password)
+                } else {
+                    TextField("UUID", text: $node.userID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if node.protocolName.lowercased() == "vmess" {
+                        TextField("Alter ID", value: $node.alterID, format: .number)
+                            .keyboardType(.numberPad)
+                        TextField("Security", text: $node.security)
+                    } else {
+                        TextField("Flow", text: $node.flow)
+                    }
+                }
+            }
+
+            Section("Transport & TLS") {
+                Picker("Transport", selection: $node.transport) {
+                    Text("TCP").tag("tcp")
+                    Text("WebSocket").tag("ws")
+                    Text("gRPC").tag("grpc")
+                    Text("HTTP").tag("http")
+                }
+                Picker("TLS", selection: $node.tlsMode) {
+                    Text("None").tag("none")
+                    Text("TLS").tag("tls")
+                    if node.protocolName.lowercased() == "vless" {
+                        Text("Reality").tag("reality")
+                    }
+                }
+                TextField("Server Name (SNI)", text: $node.serverName)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                if node.transport != "tcp" {
+                    TextField("Host", text: $node.host)
+                    TextField(node.transport == "grpc" ? "Service Name" : "Path", text: $node.path)
+                }
+                if node.tlsMode == "reality" {
+                    TextField("Reality Public Key", text: $node.realityPublicKey)
+                    TextField("Reality Short ID", text: $node.realityShortID)
+                }
+                Toggle("Allow Insecure", isOn: $node.allowInsecure)
             }
         }
         .navigationTitle("Edit Node")
@@ -232,6 +328,7 @@ struct ProxyNodeEditorView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") {
+                    onCommit()
                     dismiss()
                 }
             }

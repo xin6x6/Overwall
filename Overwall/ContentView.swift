@@ -31,4 +31,6 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environment(ProxyStore())
+        .environment(TunnelController())
 }
