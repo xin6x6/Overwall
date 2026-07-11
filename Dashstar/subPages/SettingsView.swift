@@ -64,7 +64,7 @@ struct SettingsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     Form(
-                        height: 170,
+                        measurementMinimumHeight: 220,
                         verticalContentMargin: 8,
                         bottomContentMargin: 12,
                         allowsScrolling: false

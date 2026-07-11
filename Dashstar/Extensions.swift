@@ -30,6 +30,7 @@ extension Color {
 struct Form<Content: View>: View {
     private let content: Content
     private let heightOverride: CGFloat?
+    private let measurementMinimumHeight: CGFloat?
     private let verticalContentMargin: CGFloat
     private let bottomContentMargin: CGFloat
     private let horizontalContentMargin: CGFloat
@@ -40,6 +41,7 @@ struct Form<Content: View>: View {
 
     init(
         height: CGFloat? = nil,
+        measurementMinimumHeight: CGFloat? = nil,
         verticalContentMargin: CGFloat = 8,
         bottomContentMargin: CGFloat? = nil,
         horizontalContentMargin: CGFloat = 16,
@@ -47,6 +49,7 @@ struct Form<Content: View>: View {
         @ViewBuilder content: () -> Content
     ) {
         self.heightOverride = height
+        self.measurementMinimumHeight = measurementMinimumHeight
         self.verticalContentMargin = verticalContentMargin
         self.bottomContentMargin = bottomContentMargin ?? verticalContentMargin
         self.horizontalContentMargin = horizontalContentMargin
@@ -78,7 +81,7 @@ struct Form<Content: View>: View {
         } action: { _, metrics in
             updateHeight(using: metrics)
         }
-        .frame(height: heightOverride ?? fittedHeight)
+        .frame(height: heightOverride ?? fittedHeight ?? measurementMinimumHeight)
         .frame(maxWidth: .infinity)
         .compatibleGlassSurface(cornerRadius: 30)
         .padding(.horizontal)

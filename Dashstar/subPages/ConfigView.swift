@@ -11,11 +11,15 @@ struct ConfigView: View {
     @Environment(ProxyStore.self) private var store
     @Environment(TunnelController.self) private var tunnel
     @State private var operationError: String?
+    @State private var routingTestInput = ""
+    @State private var routingTestResult: RoutingTestResult?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
+                    routingTestCard.padding(.bottom, 30)
+
                     Form(
                         height: configListHeight,
                         verticalContentMargin: 8,
@@ -58,6 +62,59 @@ struct ConfigView: View {
             } message: {
                 Text(operationError ?? "Unknown error")
             }
+        }
+    }
+
+    private var routingTestCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Routing Test", systemImage: "point.3.connected.trianglepath.dotted")
+                .font(.headline)
+
+            HStack(spacing: 10) {
+                TextField("URL or host name", text: $routingTestInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .submitLabel(.go)
+                    .onSubmit { runRoutingTest() }
+
+                Button("Test") { runRoutingTest() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(routingTestInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let result = routingTestResult {
+                HStack(alignment: .top, spacing: 10) {
+                    Text(result.target.displayName)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(result.target.resultColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(result.target.resultColor.opacity(0.12), in: Capsule())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(result.reason).font(.subheadline.weight(.semibold))
+                        Text(result.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .compatibleGlassSurface(cornerRadius: 30)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
+    private func runRoutingTest() {
+        InteractionFeedback.tap()
+        do {
+            routingTestResult = try RoutingRuleTester().test(routingTestInput, snapshot: store.snapshot)
+        } catch {
+            routingTestResult = nil
+            operationError = error.localizedDescription
         }
     }
 
@@ -123,6 +180,24 @@ struct ConfigView: View {
             await tunnel.reload(snapshot: store.snapshot)
         } catch {
             operationError = error.localizedDescription
+        }
+    }
+}
+
+private extension RouteTarget {
+    var displayName: LocalizedStringKey {
+        switch self {
+        case .proxy: "Proxy"
+        case .direct: "Direct"
+        case .block: "Reject"
+        }
+    }
+
+    var resultColor: Color {
+        switch self {
+        case .proxy: .orange
+        case .direct: .green
+        case .block: .red
         }
     }
 }
