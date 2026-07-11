@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  Overwall Watch App
+//  Dashstar Watch App
 //
 //  Created by Ng1nx on 7/10/26.
 //

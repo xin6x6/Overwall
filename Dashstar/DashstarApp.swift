@@ -1,6 +1,6 @@
 //
-//  OverwallApp.swift
-//  Overwall
+//  DashstarApp.swift
+//  Dashstar
 //
 //  Created by Ng1nx on 7/10/26.
 //
@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct OverwallApp: App {
+struct DashstarApp: App {
     @State private var proxyStore = ProxyStore()
     @State private var tunnelController = TunnelController()
     @State private var statisticsPiPController = StatisticsPiPController()

@@ -135,7 +135,7 @@ struct SingBoxConfigBuilder {
             "experimental": [
                 "clash_api": [
                     "external_controller": "127.0.0.1:9090",
-                    "secret": "overwall-local-probe",
+                    "secret": "dashstar-local-probe",
                 ],
             ],
         ]

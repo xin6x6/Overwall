@@ -83,7 +83,7 @@ private actor TunnelTrafficMonitor {
             return response(error: "Invalid Clash API URL.")
         }
         var request = URLRequest(url: url)
-        request.setValue("Bearer overwall-local-probe", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer dashstar-local-probe", forHTTPHeaderField: "Authorization")
         do {
         let (data, urlResponse) = try await URLSession.shared.data(for: request)
         guard let http = urlResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode),
@@ -195,7 +195,7 @@ private func outboundConnectLatency(tag: String) async -> Int? {
     ]
     guard let url = components.url else { return nil }
     var request = URLRequest(url: url)
-    request.setValue("Bearer overwall-local-probe", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer dashstar-local-probe", forHTTPHeaderField: "Authorization")
     do {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),

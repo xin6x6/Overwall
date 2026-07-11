@@ -171,7 +171,7 @@ struct SubscriptionService {
               scheme == "https" || scheme == "http" else { throw SubscriptionError.invalidURL }
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
-        request.setValue("Overwall/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Dashstar/1.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw SubscriptionError.invalidResponse

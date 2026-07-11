@@ -19,7 +19,7 @@ final class ProxyStore {
         let baseURL = fileManager.containerURL(
             forSecurityApplicationGroupIdentifier: AppIdentifiers.appGroup
         ) ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        persistenceURL = baseURL.appendingPathComponent("overwall-state.json")
+        persistenceURL = baseURL.appendingPathComponent("dashstar-state.json")
 
         if let data = try? Data(contentsOf: persistenceURL),
            var saved = try? decoder.decode(ProxyAppSnapshot.self, from: data) {
@@ -123,6 +123,6 @@ final class ProxyStore {
 }
 
 enum AppIdentifiers {
-    static let appGroup = "group.com.xin.Overwall"
-    static let packetTunnelBundle = "com.xin.Overwall.PacketTunnel"
+    static let appGroup = "group.com.xin.Dashstar"
+    static let packetTunnelBundle = "com.xin.Dashstar.PacketTunnel"
 }

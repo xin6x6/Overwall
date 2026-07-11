@@ -8,7 +8,7 @@ import UserNotifications
 #endif
 
 public class ExtensionPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol, LibboxCommandServerHandlerProtocol {
-    private static let logger = Logger(subsystem: "com.xin.Overwall.PacketTunnel", category: "ExtensionPlatformInterface")
+    private static let logger = Logger(subsystem: "com.xin.Dashstar.PacketTunnel", category: "ExtensionPlatformInterface")
     private let tunnel: ExtensionProvider
     private var networkSettings: NEPacketTunnelNetworkSettings?
 
@@ -690,7 +690,7 @@ public class ExtensionPlatformInterface: NSObject, LibboxPlatformInterfaceProtoc
     }
 
     public func tailscaleHostname() -> String {
-        "Overwall"
+        "Dashstar"
     }
 
     public func usePlatformBridge() -> Bool {

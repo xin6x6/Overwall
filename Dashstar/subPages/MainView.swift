@@ -1,6 +1,6 @@
 //
 //  MainView.swift
-//  Overwall
+//  Dashstar
 //
 //  Created by Ng1nx on 7/10/26.
 //
@@ -190,7 +190,7 @@ struct MainView: View {
                     }
                 }
             }
-            .alert("Overwall", isPresented: errorBinding) {
+            .alert("Dashstar", isPresented: errorBinding) {
                 Button("OK") {
                     tunnel.lastError = nil
                     operationError = nil

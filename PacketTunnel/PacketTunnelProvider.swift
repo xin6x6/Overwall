@@ -13,7 +13,7 @@ class ExtensionProvider: NEPacketTunnelProvider {
     }
 
     private static let logger = Logger(
-        subsystem: "com.xin.Overwall.PacketTunnel",
+        subsystem: "com.xin.Dashstar.PacketTunnel",
         category: "PacketTunnel"
     )
 
@@ -49,7 +49,7 @@ class ExtensionProvider: NEPacketTunnelProvider {
         configurationContent = configuration
 
         let baseURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: "group.com.xin.Overwall"
+            forSecurityApplicationGroupIdentifier: "group.com.xin.Dashstar"
         ) ?? FileManager.default.temporaryDirectory
         let workingURL = baseURL.appendingPathComponent("LibboxWorking", isDirectory: true)
         let temporaryURL = baseURL.appendingPathComponent("LibboxTemp", isDirectory: true)
@@ -86,7 +86,7 @@ class ExtensionProvider: NEPacketTunnelProvider {
 
         try commandServer.start()
         try startService()
-        writeMessage("Overwall packet tunnel started")
+        writeMessage("Dashstar packet tunnel started")
     }
 
     private func startService() throws {
@@ -119,7 +119,7 @@ class ExtensionProvider: NEPacketTunnelProvider {
 
     private var startupErrorURL: URL? {
         FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: "group.com.xin.Overwall"
+            forSecurityApplicationGroupIdentifier: "group.com.xin.Dashstar"
         )?.appendingPathComponent("last-tunnel-error.txt")
     }
 

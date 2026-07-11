@@ -1,6 +1,6 @@
 //
 //  AddProxyViews.swift
-//  Overwall
+//  Dashstar
 //
 
 import SwiftUI

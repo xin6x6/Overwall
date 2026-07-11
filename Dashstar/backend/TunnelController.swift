@@ -141,10 +141,10 @@ final class TunnelController {
         let tunnelProtocol = (manager.protocolConfiguration as? NETunnelProviderProtocol)
             ?? NETunnelProviderProtocol()
         tunnelProtocol.providerBundleIdentifier = AppIdentifiers.packetTunnelBundle
-        tunnelProtocol.serverAddress = "Overwall"
+        tunnelProtocol.serverAddress = "Dashstar"
         tunnelProtocol.providerConfiguration = ["configContent": configContent]
         manager.protocolConfiguration = tunnelProtocol
-        manager.localizedDescription = "Overwall"
+        manager.localizedDescription = "Dashstar"
         manager.isEnabled = true
         try await manager.saveToPreferences()
         try await manager.loadFromPreferences()
