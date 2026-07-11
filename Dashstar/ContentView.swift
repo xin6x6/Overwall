@@ -6,9 +6,16 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @Environment(StatisticsPiPController.self) private var statisticsPiP
+    @Environment(ProxyStore.self) private var store
+    @Environment(TunnelController.self) private var tunnel
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("lastInspectedPasteboardChange") private var lastInspectedPasteboardChange = -1
+    @State private var isShowingClipboardImport = false
+    @State private var clipboardImportError: String?
     var body: some View {
         TabView {
             MainView().tabItem {
@@ -33,6 +40,95 @@ struct ContentView: View {
                 .frame(width: 320, height: 180)
                 .offset(x: -1_000, y: -1_000)
                 .allowsHitTesting(false)
+        }
+        .alert("Import Subscription?", isPresented: $isShowingClipboardImport) {
+            Button("Import") { Task { await importClipboardSubscription() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A possible subscription URL was found in the clipboard. Would you like to import it as a new group?")
+        }
+        .alert("Clipboard Import", isPresented: clipboardErrorBinding) {
+            Button("OK") { clipboardImportError = nil }
+        } message: {
+            Text(clipboardImportError ?? "Unable to import the subscription.")
+        }
+        .task { await inspectClipboard() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await inspectClipboard() }
+        }
+    }
+
+    private var clipboardErrorBinding: Binding<Bool> {
+        Binding(
+            get: { clipboardImportError != nil },
+            set: { if !$0 { clipboardImportError = nil } }
+        )
+    }
+
+    private func inspectClipboard() async {
+        let pasteboard = UIPasteboard.general
+        let changeCount = pasteboard.changeCount
+        guard changeCount != lastInspectedPasteboardChange else { return }
+        do {
+            let probableURL = \UIPasteboard.DetectedValues.probableWebURL
+            let patterns = try await pasteboard.detectedPatterns(for: [probableURL])
+            lastInspectedPasteboardChange = changeCount
+            if patterns.contains(probableURL) { isShowingClipboardImport = true }
+        } catch {
+            // Pattern detection can be unavailable under managed pasteboard policies.
+        }
+    }
+
+    private func importClipboardSubscription() async {
+        let rawValue = UIPasteboard.general.url?.absoluteString ?? UIPasteboard.general.string ?? ""
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: value),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else {
+            clipboardImportError = "The clipboard does not contain a valid HTTP or HTTPS subscription URL."
+            return
+        }
+        guard !store.snapshot.groups.contains(where: { $0.subscriptionURL == value }) else {
+            clipboardImportError = "This subscription has already been imported."
+            return
+        }
+
+        let groupID = UUID()
+        do {
+            let imported = try await SubscriptionService().fetchGroupSubscription(
+                from: value,
+                groupID: groupID
+            )
+            let groupName = url.host(percentEncoded: false)?.replacingOccurrences(of: "www.", with: "")
+                ?? "Imported Subscription"
+            store.mutate { snapshot in
+                let anotherGroupIsSelected = snapshot.groups.contains { $0.selectedServerID != nil }
+                let group = StoredProxyGroup(
+                    id: groupID,
+                    name: groupName,
+                    subscriptionURL: value,
+                    selectedServerID: anotherGroupIsSelected ? nil : imported.servers.first?.id,
+                    servers: imported.servers,
+                    subscriptionUsage: imported.usage
+                )
+                snapshot.groups.append(group)
+                if let route = imported.routeConfig {
+                    let config = StoredRouteConfig(
+                        name: "\(groupName) Default",
+                        subscriptionURL: value,
+                        rules: route.rules,
+                        remoteRuleSets: route.remoteRuleSets,
+                        sourceGroupID: groupID,
+                        generalOptions: route.generalOptions
+                    )
+                    snapshot.routeConfigs.append(config)
+                    if snapshot.selectedConfigID == nil { snapshot.selectedConfigID = config.id }
+                }
+            }
+            await tunnel.reload(snapshot: store.snapshot)
+        } catch {
+            clipboardImportError = error.localizedDescription
         }
     }
 }
