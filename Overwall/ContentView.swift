@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(StatisticsPiPController.self) private var statisticsPiP
     var body: some View {
         TabView {
             MainView().tabItem {
@@ -27,24 +28,24 @@ struct ContentView: View {
             }
         }
         .globalInteractionFeedback()
+        .overlay(alignment: .topLeading) {
+            PiPSampleBufferHost(controller: statisticsPiP)
+                .frame(width: 320, height: 180)
+                .offset(x: -1_000, y: -1_000)
+                .allowsHitTesting(false)
+        }
     }
 }
 
 private struct GlobalInteractionFeedback: ViewModifier {
-    @State private var touchFeedback = 0
     @State private var dragFeedback = 0
-    @State private var isTouching = false
     @State private var didTriggerDrag = false
 
     func body(content: Content) -> some View {
         content
             .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 12)
                     .onChanged { value in
-                        if !isTouching {
-                            isTouching = true
-                            touchFeedback += 1
-                        }
                         let distance = hypot(value.translation.width, value.translation.height)
                         if distance > 12, !didTriggerDrag {
                             didTriggerDrag = true
@@ -52,11 +53,9 @@ private struct GlobalInteractionFeedback: ViewModifier {
                         }
                     }
                     .onEnded { _ in
-                        isTouching = false
                         didTriggerDrag = false
                     }
             )
-            .sensoryFeedback(.selection, trigger: touchFeedback)
             .sensoryFeedback(.impact(weight: .light), trigger: dragFeedback)
     }
 }
@@ -71,4 +70,5 @@ private extension View {
     ContentView()
         .environment(ProxyStore())
         .environment(TunnelController())
+        .environment(StatisticsPiPController())
 }

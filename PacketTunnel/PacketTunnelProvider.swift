@@ -135,6 +135,10 @@ class ExtensionProvider: NEPacketTunnelProvider {
     }
 
     override func handleAppMessage(_ messageData: Data) async -> Data? {
+        if let object = try? JSONSerialization.jsonObject(with: messageData) as? [String: Any],
+           object["type"] as? String == "trafficStats" {
+            return try? JSONEncoder().encode(await currentTunnelTraffic())
+        }
         if let request = try? JSONDecoder().decode(TunnelProbeRequest.self, from: messageData),
            request.type == "latencyTest" {
             let response = await TunnelProbeService().run(request)

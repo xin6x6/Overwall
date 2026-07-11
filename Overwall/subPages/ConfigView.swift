@@ -131,4 +131,5 @@ struct ConfigView: View {
     ContentView()
         .environment(ProxyStore())
         .environment(TunnelController())
+        .environment(StatisticsPiPController())
 }

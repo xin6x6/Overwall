@@ -68,6 +68,7 @@ struct MainView: View {
                     store.mutate { $0.routingMode = StoredRoutingMode(rawValue: mode.rawValue) ?? .config }
                     Task { await tunnel.reload(snapshot: store.snapshot) }
                 }
+                .sensoryFeedback(.selection, trigger: routing)
                 
                     // Test Connectivity
                 Picker(selection: $testConnectivityMethod) {
@@ -93,6 +94,7 @@ struct MainView: View {
                         )
                 }
                 .disabled(isTestingConnectivity)
+                .sensoryFeedback(.selection, trigger: testConnectivityMethod)
                 }
                 .environment(\.defaultMinListRowHeight, 52)
                 .padding(.bottom, 30)
@@ -498,4 +500,5 @@ struct MainView: View {
     ContentView()
         .environment(ProxyStore())
         .environment(TunnelController())
+        .environment(StatisticsPiPController())
 }

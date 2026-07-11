@@ -47,6 +47,121 @@ struct TunnelProbeService {
     }
 }
 
+struct TunnelTrafficResponse: Codable {
+    let uploadTotal: Int64
+    let downloadTotal: Int64
+    let directUploadTotal: Int64
+    let directDownloadTotal: Int64
+    let proxyUploadTotal: Int64
+    let proxyDownloadTotal: Int64
+    let connectedAt: Date?
+    let error: String?
+}
+
+private let tunnelTrafficMonitor = TunnelTrafficMonitor()
+
+func currentTunnelTraffic() async -> TunnelTrafficResponse {
+    await tunnelTrafficMonitor.read()
+}
+
+private actor TunnelTrafficMonitor {
+    private struct Counters {
+        let upload: Int64
+        let download: Int64
+    }
+
+    private var previousConnections: [String: Counters] = [:]
+    private var directUpload: Int64 = 0
+    private var directDownload: Int64 = 0
+    private var proxyUpload: Int64 = 0
+    private var proxyDownload: Int64 = 0
+    private var connectedAt: Date?
+    private var previousGlobal: Counters?
+
+    func read() async -> TunnelTrafficResponse {
+        guard let url = URL(string: "http://127.0.0.1:9090/connections") else {
+            return response(error: "Invalid Clash API URL.")
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer overwall-local-probe", forHTTPHeaderField: "Authorization")
+        do {
+        let (data, urlResponse) = try await URLSession.shared.data(for: request)
+        guard let http = urlResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return response(error: "Unable to read tunnel traffic.")
+        }
+        let upload = (object["uploadTotal"] as? NSNumber)?.int64Value ?? 0
+        let download = (object["downloadTotal"] as? NSNumber)?.int64Value ?? 0
+        if connectedAt == nil || upload < (previousGlobal?.upload ?? 0) || download < (previousGlobal?.download ?? 0) {
+            connectedAt = Date()
+            previousConnections.removeAll()
+            directUpload = 0
+            directDownload = 0
+            proxyUpload = 0
+            proxyDownload = 0
+        }
+        previousGlobal = Counters(upload: upload, download: download)
+        let connections = object["connections"] as? [[String: Any]] ?? []
+        var currentConnections: [String: Counters] = [:]
+        for connection in connections {
+            guard let id = connection["id"] as? String else { continue }
+            let counters = Counters(
+                upload: (connection["upload"] as? NSNumber)?.int64Value ?? 0,
+                download: (connection["download"] as? NSNumber)?.int64Value ?? 0
+            )
+            currentConnections[id] = counters
+            guard let previous = previousConnections[id] else { continue }
+            let uploadDelta = max(0, counters.upload - previous.upload)
+            let downloadDelta = max(0, counters.download - previous.download)
+            if usesProxy(connection) {
+                proxyUpload += uploadDelta
+                proxyDownload += downloadDelta
+            } else {
+                directUpload += uploadDelta
+                directDownload += downloadDelta
+            }
+        }
+        previousConnections = currentConnections
+        return TunnelTrafficResponse(
+            uploadTotal: upload,
+            downloadTotal: download,
+            directUploadTotal: directUpload,
+            directDownloadTotal: directDownload,
+            proxyUploadTotal: proxyUpload,
+            proxyDownloadTotal: proxyDownload,
+            connectedAt: connectedAt,
+            error: nil
+        )
+        } catch {
+            return response(error: error.localizedDescription)
+        }
+    }
+
+    private func usesProxy(_ connection: [String: Any]) -> Bool {
+        let metadata = connection["metadata"] as? [String: Any]
+        let outbound = (metadata?["outbound"] as? String)
+            ?? (connection["outbound"] as? String)
+            ?? ""
+        let chains = connection["chains"] as? [String] ?? []
+        return ([outbound] + chains).contains {
+            $0 == "proxy" || $0.hasPrefix("server-")
+        }
+    }
+
+    private func response(error: String) -> TunnelTrafficResponse {
+        TunnelTrafficResponse(
+            uploadTotal: 0,
+            downloadTotal: 0,
+            directUploadTotal: directUpload,
+            directDownloadTotal: directDownload,
+            proxyUploadTotal: proxyUpload,
+            proxyDownloadTotal: proxyDownload,
+            connectedAt: connectedAt,
+            error: error
+        )
+    }
+}
+
 private func tcpLatency(host: String, port: Int, timeout: TimeInterval = 5) async -> Int? {
     guard let endpointPort = NWEndpoint.Port(rawValue: UInt16(clamping: port)) else { return nil }
     return await withCheckedContinuation { continuation in

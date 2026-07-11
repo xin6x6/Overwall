@@ -97,6 +97,24 @@ final class TunnelController {
         })
     }
 
+    func trafficTotals() async throws -> TunnelTrafficTotals? {
+        guard status == .connected || status == .reasserting,
+              let session = manager?.connection as? NETunnelProviderSession else { return nil }
+        let request = try JSONSerialization.data(withJSONObject: ["type": "trafficStats"])
+        guard let data = try await send(data: request, through: session) else { return nil }
+        let response = try JSONDecoder().decode(TunnelTrafficResponse.self, from: data)
+        if let error = response.error { throw TunnelProbeError.providerRejected(error) }
+        return TunnelTrafficTotals(
+            upload: response.uploadTotal,
+            download: response.downloadTotal,
+            directUpload: response.directUploadTotal,
+            directDownload: response.directDownloadTotal,
+            proxyUpload: response.proxyUploadTotal,
+            proxyDownload: response.proxyDownloadTotal,
+            connectedAt: response.connectedAt
+        )
+    }
+
     private func waitUntilConnected() async throws {
         for _ in 0..<100 {
             refreshStatus()
@@ -186,6 +204,27 @@ private struct TunnelProbeItem: Codable {
 
 private struct TunnelProbeResponse: Codable {
     let results: [TunnelProbeResult]
+    let error: String?
+}
+
+struct TunnelTrafficTotals: Equatable {
+    let upload: Int64
+    let download: Int64
+    let directUpload: Int64
+    let directDownload: Int64
+    let proxyUpload: Int64
+    let proxyDownload: Int64
+    let connectedAt: Date?
+}
+
+private struct TunnelTrafficResponse: Codable {
+    let uploadTotal: Int64
+    let downloadTotal: Int64
+    let directUploadTotal: Int64
+    let directDownloadTotal: Int64
+    let proxyUploadTotal: Int64
+    let proxyDownloadTotal: Int64
+    let connectedAt: Date?
     let error: String?
 }
 
