@@ -14,21 +14,31 @@ struct ConfigView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                ForEach(store.snapshot.routeConfigs) { config in
-                    ConfigBar(
-                        config: configBinding(config.id),
-                        isSelected: store.snapshot.selectedConfigID == config.id,
-                        onDelete: { deleteConfig(config.id) },
-                        onRefresh: { Task { await refreshConfig(config.id) } },
-                        onCommit: { Task { await tunnel.reload(snapshot: store.snapshot) } }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    Form(
+                        height: configListHeight,
+                        verticalContentMargin: 8,
+                        allowsScrolling: false
                     ) {
-                        store.mutate { $0.selectedConfigID = config.id }
-                        Task { await tunnel.reload(snapshot: store.snapshot) }
+                        ForEach(store.snapshot.routeConfigs) { config in
+                            ConfigBar(
+                                config: configBinding(config.id),
+                                isSelected: store.snapshot.selectedConfigID == config.id,
+                                onDelete: { deleteConfig(config.id) },
+                                onRefresh: { Task { await refreshConfig(config.id) } },
+                                onCommit: { Task { await tunnel.reload(snapshot: store.snapshot) } }
+                            ) {
+                                store.mutate { $0.selectedConfigID = config.id }
+                                Task { await tunnel.reload(snapshot: store.snapshot) }
+                            }
+                        }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .navigationTitle("Config")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -51,6 +61,12 @@ struct ConfigView: View {
         }
     }
 
+    private var configListHeight: CGFloat {
+        // A custom Form inside a ScrollView cannot discover an unconstrained
+        // height on its first layout pass. Each ConfigBar is exactly 52 pt.
+        CGFloat(max(store.snapshot.routeConfigs.count, 1)) * 52 + 16
+    }
+
     private func configBinding(_ id: UUID) -> Binding<ConfigProfile> {
         Binding {
             let config = store.snapshot.routeConfigs.first(where: { $0.id == id })
@@ -59,7 +75,8 @@ struct ConfigView: View {
                 name: config?.name ?? "",
                 subscriptionURL: config?.subscriptionURL ?? "",
                 rules: config?.rules ?? [],
-                remoteRuleSets: config?.remoteRuleSets ?? []
+                remoteRuleSets: config?.remoteRuleSets ?? [],
+                generalOptions: config?.generalOptions ?? []
             )
         } set: { edited in
             store.mutate { snapshot in
@@ -68,6 +85,7 @@ struct ConfigView: View {
                 snapshot.routeConfigs[index].subscriptionURL = edited.subscriptionURL.isEmpty ? nil : edited.subscriptionURL
                 snapshot.routeConfigs[index].rules = edited.rules
                 snapshot.routeConfigs[index].remoteRuleSets = edited.remoteRuleSets
+                snapshot.routeConfigs[index].generalOptions = edited.generalOptions
             }
         }
     }
@@ -96,6 +114,7 @@ struct ConfigView: View {
                 guard let index = snapshot.routeConfigs.firstIndex(where: { $0.id == id }) else { return }
                 snapshot.routeConfigs[index].rules = imported.rules
                 snapshot.routeConfigs[index].remoteRuleSets = imported.remoteRuleSets
+                snapshot.routeConfigs[index].generalOptions = imported.generalOptions
             }
             await tunnel.reload(snapshot: store.snapshot)
         } catch {

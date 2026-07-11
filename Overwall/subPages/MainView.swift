@@ -59,7 +59,7 @@ struct MainView: View {
                     // Routing
                 Picker(selection: $routing) {
                     Text("Global").tag(Routing.global)
-                    Text("Config").tag(Routing.config)
+                    Text("Rule").tag(Routing.config)
                     Text("Direct").tag(Routing.direct)
                 } label : {
                     Label("Routing", systemImage: routing == .config ? "arrow.branch" : (routing == .direct ? "arrow.left.and.right" : "globe"))
@@ -85,7 +85,7 @@ struct MainView: View {
                 .disabled(isTestingConnectivity)
                 }
                 .environment(\.defaultMinListRowHeight, 52)
-                .padding(.bottom, 50)
+                .padding(.bottom, 30)
             
                 // Body
                 ForEach(store.snapshot.groups) { group in
@@ -402,13 +402,15 @@ struct MainView: View {
                             snapshot.routeConfigs[configIndex].subscriptionURL = subscriptionURL
                             snapshot.routeConfigs[configIndex].rules = importedConfig.rules
                             snapshot.routeConfigs[configIndex].remoteRuleSets = importedConfig.remoteRuleSets
+                            snapshot.routeConfigs[configIndex].generalOptions = importedConfig.generalOptions
                         } else {
                             let config = StoredRouteConfig(
                                 name: "\(snapshot.groups[index].name) Default",
                                 subscriptionURL: subscriptionURL,
                                 rules: importedConfig.rules,
                                 remoteRuleSets: importedConfig.remoteRuleSets,
-                                sourceGroupID: groupID
+                                sourceGroupID: groupID,
+                                generalOptions: importedConfig.generalOptions
                             )
                             snapshot.routeConfigs.append(config)
                             if snapshot.selectedConfigID == nil {

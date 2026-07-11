@@ -19,6 +19,7 @@ enum SubscriptionError: LocalizedError {
 struct ImportedRouteSubscription {
     var rules: [StoredRouteRule]
     var remoteRuleSets: [StoredRemoteRuleSet]
+    var generalOptions: [StoredConfigOption] = []
 }
 
 struct ImportedGroupSubscription {
@@ -68,6 +69,15 @@ struct SubscriptionService {
            let root = try? JSONSerialization.jsonObject(with: decodedData) as? [String: Any] {
             return try parseJSONRoute(root)
         }
+        if decodedText.localizedCaseInsensitiveContains("[Rule]") {
+            let parsed = ShadowrocketConfigParser().parse(decodedText)
+            guard !parsed.rules.isEmpty else { throw SubscriptionError.unsupportedContent }
+            return ImportedRouteSubscription(
+                rules: parsed.rules,
+                remoteRuleSets: parsed.remoteRuleSets ?? [],
+                generalOptions: parsed.generalOptions ?? []
+            )
+        }
         return try parseRuleList(decodedText)
     }
 
@@ -110,6 +120,8 @@ struct SubscriptionService {
             "IP-CIDR": .ipCIDR,
             "IP-CIDR6": .ipCIDR,
             "RULE-SET": .ruleSet,
+            "GEOIP": .geoIP,
+            "USER-AGENT": .userAgent,
         ]
         var rules: [StoredRouteRule] = []
         for rawLine in text.components(separatedBy: .newlines) {
@@ -122,6 +134,14 @@ struct SubscriptionService {
             }
             let fields = line.split(separator: ",", omittingEmptySubsequences: false)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if fields[0].uppercased() == "FINAL" || fields[0].uppercased() == "MATCH" {
+                guard fields.count >= 2 else { continue }
+                let action = fields[1].uppercased()
+                let target: RouteTarget = action == "DIRECT" ? .direct
+                    : (action.hasPrefix("REJECT") || action == "BLOCK" ? .block : .proxy)
+                rules.append(StoredRouteRule(matchKind: .final, value: "All unmatched traffic", target: target))
+                continue
+            }
             guard fields.count >= 3, let kind = kindMapping[fields[0].uppercased()] else { continue }
             let action = fields[2].uppercased()
             let target: RouteTarget = action == "DIRECT" ? .direct

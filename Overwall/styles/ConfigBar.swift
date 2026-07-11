@@ -13,19 +13,22 @@ struct ConfigProfile: Identifiable, Hashable {
     var subscriptionURL: String = ""
     var rules: [StoredRouteRule] = []
     var remoteRuleSets: [StoredRemoteRuleSet] = []
+    var generalOptions: [StoredConfigOption] = []
 
     init(
         id: UUID = UUID(),
         name: String,
         subscriptionURL: String = "",
         rules: [StoredRouteRule] = [],
-        remoteRuleSets: [StoredRemoteRuleSet] = []
+        remoteRuleSets: [StoredRemoteRuleSet] = [],
+        generalOptions: [StoredConfigOption] = []
     ) {
         self.id = id
         self.name = name
         self.subscriptionURL = subscriptionURL
         self.rules = rules
         self.remoteRuleSets = remoteRuleSets
+        self.generalOptions = generalOptions
     }
 }
 
@@ -59,17 +62,18 @@ struct ConfigBar: View {
     var body: some View {
         HStack(spacing: 4) {
             Button(action: onSelect) {
-                Text(config.name)
-                    .font(.headline.weight(isSelected ? .bold : .semibold))
-                    .foregroundStyle(isSelected ? Color.green : Color.primary)
-                    .shadow(
-                        color: isSelected ? Color.green.opacity(0.25) : .clear,
-                        radius: isSelected ? 5 : 0
-                    )
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.65)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(config.name)
+                        .font(.headline.weight(isSelected ? .bold : .semibold))
+                        .foregroundStyle(isSelected ? Color.green : Color.primary)
+                    Text("\(config.rules.filter { $0.enabled }.count) enabled rules")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .frame(maxWidth: .infinity)
             .buttonStyle(.plain)
@@ -129,6 +133,8 @@ struct ConfigEditorView: View {
     @Binding var config: ConfigProfile
     var onCommit: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
+    @State private var isAddingRule = false
+    @State private var newRule = StoredRouteRule(matchKind: .domainSuffix, value: "", target: .proxy)
 
     var body: some View {
         SwiftUI.Form {
@@ -140,30 +146,48 @@ struct ConfigEditorView: View {
                     .autocorrectionDisabled()
             }
 
-            Section("Routing Rules") {
-                ForEach($config.rules) { $rule in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Picker("Match", selection: $rule.matchKind) {
-                                ForEach(RouteMatchKind.allCases) { Text($0.rawValue).tag($0) }
-                            }
-                            Picker("Route", selection: $rule.target) {
-                                ForEach(RouteTarget.allCases) { Text($0.rawValue.capitalized).tag($0) }
-                            }
-                        }
-                        TextField("Domain, CIDR, or rule-set tag", text: $rule.value)
+            Section("General") {
+                ForEach($config.generalOptions) { $option in
+                    HStack(alignment: .firstTextBaseline) {
+                        TextField("Option", text: $option.key)
+                            .foregroundStyle(.secondary)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                        Toggle("Enabled", isOn: $rule.enabled)
+                            .frame(maxWidth: 150)
+                        Spacer(minLength: 16)
+                        TextField("Value", text: $option.value, axis: .vertical)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                }
+                .onDelete { config.generalOptions.remove(atOffsets: $0) }
+                Button("Add General Option", systemImage: "plus") {
+                    config.generalOptions.append(StoredConfigOption(key: "option", value: ""))
+                }
+            }
+
+            Section {
+                ForEach($config.rules) { $rule in
+                    NavigationLink {
+                        RouteRuleEditorView(rule: $rule)
+                    } label: {
+                        RouteRuleRow(rule: rule)
                     }
                 }
                 .onDelete { config.rules.remove(atOffsets: $0) }
+                .onMove { config.rules.move(fromOffsets: $0, toOffset: $1) }
 
                 Button {
-                    config.rules.append(StoredRouteRule(matchKind: .domainSuffix, value: "", target: .proxy))
+                    newRule = StoredRouteRule(matchKind: .domainSuffix, value: "", target: .proxy)
+                    isAddingRule = true
                 } label: {
                     Label("Add Rule", systemImage: "plus")
                 }
+            } header: {
+                Text("Routing Rules (\(config.rules.count))")
+            } footer: {
+                Text("Rules are evaluated from top to bottom. FINAL controls traffic that matches no earlier rule.")
             }
 
             Section("Remote Rule Sets") {
@@ -199,6 +223,7 @@ struct ConfigEditorView: View {
         .navigationTitle("Edit Config")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) { EditButton() }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") {
                     onCommit()
@@ -206,6 +231,120 @@ struct ConfigEditorView: View {
                 }
                 .disabled(config.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+        }
+        .sheet(isPresented: $isAddingRule) {
+            NavigationStack {
+                RouteRuleEditorView(rule: $newRule, isNew: true) {
+                    config.rules.append(newRule)
+                    isAddingRule = false
+                }
+            }
+        }
+    }
+}
+
+private struct RouteRuleRow: View {
+    let rule: StoredRouteRule
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: rule.matchKind.icon)
+                .foregroundStyle(rule.enabled ? rule.target.color : Color.secondary)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(rule.matchKind.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(rule.value)
+                    .font(.body)
+                    .lineLimit(2)
+            }
+            Spacer()
+            Text(rule.target.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(rule.target.color)
+        }
+        .opacity(rule.enabled ? 1 : 0.45)
+    }
+}
+
+private struct RouteRuleEditorView: View {
+    @Binding var rule: StoredRouteRule
+    var isNew = false
+    var onAdd: () -> Void = {}
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Form {
+            Section("Rule") {
+                Picker("Type", selection: $rule.matchKind) {
+                    ForEach(RouteMatchKind.allCases) { Text($0.title).tag($0) }
+                }
+                if rule.matchKind != .final {
+                    TextField(rule.matchKind.placeholder, text: $rule.value, axis: .vertical)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                Picker("Policy", selection: $rule.target) {
+                    ForEach(RouteTarget.allCases) { Text($0.title).tag($0) }
+                }
+                Toggle("Enabled", isOn: $rule.enabled)
+            }
+            if rule.matchKind == .userAgent {
+                Section { Text("USER-AGENT is preserved for Shadowrocket compatibility, but is not enforced by the current sing-box routing engine.") }
+            }
+        }
+        .navigationTitle(isNew ? "Add Rule" : "Edit Rule")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if isNew {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") { onAdd() }
+                        .disabled(rule.matchKind != .final && rule.value.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+private extension RouteTarget {
+    var title: String { self == .block ? "Reject" : rawValue.capitalized }
+    var color: Color { self == .proxy ? .blue : (self == .direct ? .green : .red) }
+}
+
+private extension RouteMatchKind {
+    var title: String {
+        switch self {
+        case .domain: "Domain"
+        case .domainSuffix: "Domain Suffix"
+        case .domainKeyword: "Domain Keyword"
+        case .ipCIDR: "IP CIDR"
+        case .ruleSet: "Rule Set"
+        case .geoIP: "GeoIP"
+        case .userAgent: "User Agent"
+        case .final: "Final"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .domain, .domainSuffix, .domainKeyword: "globe"
+        case .ipCIDR, .geoIP: "network"
+        case .ruleSet: "list.bullet.rectangle"
+        case .userAgent: "person.text.rectangle"
+        case .final: "arrow.down.to.line"
+        }
+    }
+    var placeholder: String {
+        switch self {
+        case .domain: "example.com"
+        case .domainSuffix: "example.com"
+        case .domainKeyword: "keyword"
+        case .ipCIDR: "192.168.0.0/16"
+        case .ruleSet: "rule-set tag"
+        case .geoIP: "CN"
+        case .userAgent: "Client*"
+        case .final: ""
         }
     }
 }

@@ -56,15 +56,31 @@ struct SingBoxConfigBuilder {
             let ruleSetTags = Set((config.remoteRuleSets ?? []).map(\.tag))
             rules.append(contentsOf: config.rules.filter {
                 $0.enabled
+                    && $0.matchKind != .final
+                    && $0.matchKind != .userAgent
                     && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     && ($0.matchKind != .ruleSet || ruleSetTags.contains($0.value))
+                    && ($0.matchKind != .geoIP || ruleSetTags.contains("geoip-\($0.value.lowercased())"))
             }.map(routeRule))
         }
 
         let finalOutbound: String
         switch snapshot.routingMode {
         case .direct: finalOutbound = "direct"
-        case .config, .global: finalOutbound = serverTags.isEmpty ? "direct" : "proxy"
+        case .global: finalOutbound = serverTags.isEmpty ? "direct" : "proxy"
+        case .config:
+            let selectedConfig = snapshot.routeConfigs.first(where: { $0.id == snapshot.selectedConfigID })
+                ?? snapshot.routeConfigs.first
+            let configuredTarget = selectedConfig?.rules.last(where: { $0.enabled && $0.matchKind == .final })?.target
+            switch configuredTarget {
+            case .direct: finalOutbound = "direct"
+            case .block: finalOutbound = "block"
+            case .proxy, .none: finalOutbound = serverTags.isEmpty ? "direct" : "proxy"
+            }
+        }
+
+        if finalOutbound == "block", !outbounds.contains(where: { ($0["tag"] as? String) == "block" }) {
+            outbounds.append(["type": "block", "tag": "block"])
         }
 
         var route: [String: Any] = [
@@ -190,11 +206,17 @@ struct SingBoxConfigBuilder {
         case .domainKeyword: field = "domain_keyword"
         case .ipCIDR: field = "ip_cidr"
         case .ruleSet: field = "rule_set"
+        case .geoIP:
+            field = "rule_set"
+        case .userAgent, .final:
+            // These are filtered before conversion. Keep this fallback structurally valid.
+            field = "domain"
         }
+        let value = rule.matchKind == .geoIP ? "geoip-\(rule.value.lowercased())" : rule.value
         if rule.target == .block {
-            return [field: [rule.value], "action": "reject"]
+            return [field: [value], "action": "reject"]
         }
-        return [field: [rule.value], "action": "route", "outbound": rule.target.rawValue]
+        return [field: [value], "action": "route", "outbound": rule.target.rawValue]
     }
 
     private func isUsable(_ server: StoredProxyServer) -> Bool {

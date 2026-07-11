@@ -58,12 +58,34 @@ final class ProxyStore {
                 }
             }
             snapshot = saved
+            installBundledDefaultIfNeeded()
             if repairedDuplicateIDs,
                let repairedData = try? encoder.encode(saved) {
                 try? repairedData.write(to: persistenceURL, options: .atomic)
             }
         } else {
             snapshot = .initial
+            installBundledDefaultIfNeeded()
+        }
+    }
+
+    private func installBundledDefaultIfNeeded() {
+        guard snapshot.routeConfigs.count == 1,
+              snapshot.routeConfigs[0].name == "Default",
+              snapshot.routeConfigs[0].rules.isEmpty,
+              let url = Bundle.main.url(forResource: "default", withExtension: "conf"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+        let id = snapshot.routeConfigs[0].id
+        var imported = ShadowrocketConfigParser().parse(text)
+        imported.id = id
+        snapshot.routeConfigs[0] = imported
+        snapshot.selectedConfigID = id
+        if let data = try? encoder.encode(snapshot) {
+            try? FileManager.default.createDirectory(
+                at: persistenceURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? data.write(to: persistenceURL, options: .atomic)
         }
     }
 

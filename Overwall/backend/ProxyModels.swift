@@ -57,8 +57,17 @@ enum RouteMatchKind: String, Codable, CaseIterable, Identifiable {
     case domainKeyword
     case ipCIDR
     case ruleSet
+    case geoIP
+    case userAgent
+    case final
 
     var id: Self { self }
+}
+
+struct StoredConfigOption: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var key: String
+    var value: String
 }
 
 struct StoredRouteRule: Codable, Identifiable, Hashable {
@@ -86,6 +95,8 @@ struct StoredRouteConfig: Codable, Identifiable, Hashable {
     var remoteRuleSets: [StoredRemoteRuleSet]?
     // Identifies a config managed by a proxy-group subscription.
     var sourceGroupID: UUID?
+    // Ordered Shadowrocket-style [General] options. Optional preserves old snapshots.
+    var generalOptions: [StoredConfigOption]?
 }
 
 enum StoredRoutingMode: String, Codable {
