@@ -76,7 +76,8 @@ struct ConfigView: View {
                 subscriptionURL: config?.subscriptionURL ?? "",
                 rules: config?.rules ?? [],
                 remoteRuleSets: config?.remoteRuleSets ?? [],
-                generalOptions: config?.generalOptions ?? []
+                generalOptions: config?.generalOptions ?? [],
+                isBuiltIn: config?.isBuiltIn == true
             )
         } set: { edited in
             store.mutate { snapshot in
@@ -91,6 +92,9 @@ struct ConfigView: View {
     }
 
     private func deleteConfig(_ id: UUID) {
+        guard store.snapshot.routeConfigs.first(where: { $0.id == id })?.isBuiltIn != true else {
+            return
+        }
         store.mutate { snapshot in
             snapshot.routeConfigs.removeAll { $0.id == id }
             if snapshot.selectedConfigID == id { snapshot.selectedConfigID = snapshot.routeConfigs.first?.id }

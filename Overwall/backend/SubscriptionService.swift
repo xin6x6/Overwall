@@ -25,16 +25,18 @@ struct ImportedRouteSubscription {
 struct ImportedGroupSubscription {
     var servers: [StoredProxyServer]
     var routeConfig: ImportedRouteSubscription?
+    var usage: StoredSubscriptionUsage?
 }
 
 struct SubscriptionService {
     func fetchGroupSubscription(from urlString: String, groupID: UUID) async throws -> ImportedGroupSubscription {
-        let data = try await fetch(urlString)
+        let (data, response) = try await fetchResponse(urlString)
         let servers = parseServers(from: data, groupID: groupID)
         guard !servers.isEmpty else { throw SubscriptionError.emptySubscription }
         return ImportedGroupSubscription(
             servers: servers,
-            routeConfig: try? parseRouteConfig(from: data)
+            routeConfig: try? parseRouteConfig(from: data),
+            usage: subscriptionUsage(from: response)
         )
     }
 
@@ -161,6 +163,10 @@ struct SubscriptionService {
     ]
 
     private func fetch(_ urlString: String) async throws -> Data {
+        try await fetchResponse(urlString).0
+    }
+
+    private func fetchResponse(_ urlString: String) async throws -> (Data, HTTPURLResponse) {
         guard let url = URL(string: urlString), let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http" else { throw SubscriptionError.invalidURL }
         var request = URLRequest(url: url)
@@ -171,7 +177,26 @@ struct SubscriptionService {
             throw SubscriptionError.invalidResponse
         }
         guard !data.isEmpty else { throw SubscriptionError.emptySubscription }
-        return data
+        return (data, http)
+    }
+
+    private func subscriptionUsage(from response: HTTPURLResponse) -> StoredSubscriptionUsage? {
+        guard let value = response.allHeaderFields.first(where: {
+            String(describing: $0.key).caseInsensitiveCompare("subscription-userinfo") == .orderedSame
+        }).map({ String(describing: $0.value) }) else { return nil }
+        var values: [String: String] = [:]
+        for field in value.split(separator: ";") {
+            let pair = field.split(separator: "=", maxSplits: 1).map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if pair.count == 2 { values[pair[0].lowercased()] = pair[1] }
+        }
+        let upload = values["upload"].flatMap(Int64.init)
+        let download = values["download"].flatMap(Int64.init)
+        let total = values["total"].flatMap(Int64.init)
+        let expiresAt = values["expire"].flatMap(TimeInterval.init).map(Date.init(timeIntervalSince1970:))
+        guard upload != nil || download != nil || total != nil || expiresAt != nil else { return nil }
+        return StoredSubscriptionUsage(upload: upload, download: download, total: total, expiresAt: expiresAt)
     }
 
     private func decodedSubscriptionText(_ data: Data) -> String {

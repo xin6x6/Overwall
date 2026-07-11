@@ -135,6 +135,11 @@ class ExtensionProvider: NEPacketTunnelProvider {
     }
 
     override func handleAppMessage(_ messageData: Data) async -> Data? {
+        if let request = try? JSONDecoder().decode(TunnelProbeRequest.self, from: messageData),
+           request.type == "latencyTest" {
+            let response = await TunnelProbeService().run(request)
+            return try? JSONEncoder().encode(response)
+        }
         guard let configuration = String(data: messageData, encoding: .utf8),
               !configuration.isEmpty else {
             return "Invalid configuration".data(using: .utf8)

@@ -41,6 +41,14 @@ struct StoredProxyGroup: Codable, Identifiable, Hashable {
     var subscriptionURL: String?
     var selectedServerID: UUID?
     var servers: [StoredProxyServer] = []
+    var subscriptionUsage: StoredSubscriptionUsage?
+}
+
+struct StoredSubscriptionUsage: Codable, Hashable {
+    var upload: Int64?
+    var download: Int64?
+    var total: Int64?
+    var expiresAt: Date?
 }
 
 enum RouteTarget: String, Codable, CaseIterable, Identifiable {
@@ -97,6 +105,8 @@ struct StoredRouteConfig: Codable, Identifiable, Hashable {
     var sourceGroupID: UUID?
     // Ordered Shadowrocket-style [General] options. Optional preserves old snapshots.
     var generalOptions: [StoredConfigOption]?
+    // Built-in profiles stay editable/selectable but cannot be deleted.
+    var isBuiltIn: Bool?
 }
 
 enum StoredRoutingMode: String, Codable {
@@ -113,7 +123,7 @@ struct ProxyAppSnapshot: Codable {
 
     static let initial = ProxyAppSnapshot(
         groups: [StoredProxyGroup(name: "Default")],
-        routeConfigs: [StoredRouteConfig(name: "Default")],
+        routeConfigs: [StoredRouteConfig(name: "Default", isBuiltIn: true)],
         selectedConfigID: nil,
         routingMode: .config
     )

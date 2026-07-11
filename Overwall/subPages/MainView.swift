@@ -75,7 +75,17 @@ struct MainView: View {
                     Text("ICMP").tag(TCM.icmp)
                     Text("Connect").tag(TCM.connect)
                 } label: {
-                    Label("Test Connectivity", systemImage: "arrow.2.circlepath")
+                    Label {
+                        Text("Test Connectivity")
+                    } icon: {
+                        TimelineView(.animation(
+                            minimumInterval: 1.0 / 30.0,
+                            paused: !isTestingConnectivity
+                        )) { context in
+                            Image(systemName: "arrow.2.circlepath")
+                                .rotationEffect(connectivityIconRotation(at: context.date))
+                        }
+                    }
                         .simultaneousGesture(
                             TapGesture().onEnded {
                                 Task { await testAllServers() }
@@ -91,7 +101,9 @@ struct MainView: View {
                 ForEach(store.snapshot.groups) { group in
                     CollapsibleForm(
                         LocalizedStringKey(group.name),
-                        expandedHeight: CGFloat(group.servers.count + 1) * 52,
+                        subscriptionUsage: group.subscriptionUsage,
+                        // Keep the final node clear of the 30 pt bottom corner.
+                        expandedHeight: CGFloat(group.servers.count + 1) * 52 + 8,
                         onRefresh: { Task { await refreshGroup(group.id) } },
                         onDelete: { groupPendingDeletion = group },
                         onEdit: { editingGroup = group }
@@ -110,6 +122,7 @@ struct MainView: View {
                 }
                 }
             }
+            .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .navigationTitle("Main")
             .navigationBarTitleDisplayMode(.inline)
@@ -392,6 +405,7 @@ struct MainView: View {
                         $0.id != groupID && $0.selectedServerID != nil
                     }
                     snapshot.groups[index].servers = imported
+                    snapshot.groups[index].subscriptionUsage = subscription.usage
                     snapshot.groups[index].selectedServerID = imported.contains(where: { $0.id == selected })
                         ? selected : (anotherGroupIsSelected ? nil : imported.first?.id)
 
@@ -431,8 +445,8 @@ struct MainView: View {
                     }
                 }
             }
-            await testServers(in: groupID)
             await tunnel.reload(snapshot: store.snapshot)
+            try await testServers(in: groupID)
         } catch {
             operationError = error.localizedDescription
         }
@@ -442,30 +456,34 @@ struct MainView: View {
         guard !isTestingConnectivity else { return }
         isTestingConnectivity = true
         defer { isTestingConnectivity = false }
-        for group in store.snapshot.groups {
-            await testServers(in: group.id)
+        do {
+            for group in store.snapshot.groups {
+                try await testServers(in: group.id)
+            }
+        } catch {
+            operationError = error.localizedDescription
         }
     }
 
-    private func testServers(in groupID: UUID) async {
+    private func connectivityIconRotation(at date: Date) -> Angle {
+        guard isTestingConnectivity else { return .zero }
+        let turns = date.timeIntervalSinceReferenceDate
+            .truncatingRemainder(dividingBy: 0.8) / 0.8
+        return .degrees(turns * 360)
+    }
+
+    private func testServers(in groupID: UUID) async throws {
         guard let servers = store.snapshot.groups.first(where: { $0.id == groupID })?.servers else { return }
-        let results = await withTaskGroup(of: (UUID, Int?).self, returning: [UUID: Int].self) { group in
-            for server in servers {
-                group.addTask {
-                    (server.id, await ConnectivityService().latency(to: server))
-                }
-            }
-            var values: [UUID: Int] = [:]
-            for await (id, latency) in group { values[id] = latency ?? -1 }
-            return values
-        }
+        let results = try await tunnel.latencyTest(
+            method: testConnectivityMethod.rawValue,
+            servers: servers,
+            snapshot: store.snapshot
+        )
         store.mutate { snapshot in
             guard let groupIndex = snapshot.groups.firstIndex(where: { $0.id == groupID }) else { return }
             for serverIndex in snapshot.groups[groupIndex].servers.indices {
                 let id = snapshot.groups[groupIndex].servers[serverIndex].id
-                if let result = results[id] {
-                    snapshot.groups[groupIndex].servers[serverIndex].latencyMilliseconds = result >= 0 ? result : nil
-                }
+                snapshot.groups[groupIndex].servers[serverIndex].latencyMilliseconds = results[id]
             }
         }
     }

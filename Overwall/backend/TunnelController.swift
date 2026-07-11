@@ -67,6 +67,48 @@ final class TunnelController {
         }
     }
 
+    func latencyTest(method: String, servers: [StoredProxyServer], snapshot: ProxyAppSnapshot) async throws -> [UUID: Int] {
+        if status != .connected {
+            await setEnabled(true, snapshot: snapshot)
+            try await waitUntilConnected()
+        }
+        guard let session = manager?.connection as? NETunnelProviderSession else {
+            throw TunnelProbeError.sessionUnavailable
+        }
+        let request = TunnelProbeRequest(
+            type: "latencyTest",
+            method: method,
+            probes: servers.map {
+                TunnelProbeItem(
+                    id: $0.id,
+                    address: $0.address,
+                    port: $0.port,
+                    outboundTag: SingBoxConfigBuilder.outboundTag(for: $0.id)
+                )
+            }
+        )
+        let data = try JSONEncoder().encode(request)
+        let responseData = try await send(data: data, through: session)
+        guard let responseData else { throw TunnelProbeError.emptyResponse }
+        let response = try JSONDecoder().decode(TunnelProbeResponse.self, from: responseData)
+        if let error = response.error { throw TunnelProbeError.providerRejected(error) }
+        return Dictionary(uniqueKeysWithValues: response.results.compactMap { item in
+            item.latency.map { (item.id, $0) }
+        })
+    }
+
+    private func waitUntilConnected() async throws {
+        for _ in 0..<100 {
+            refreshStatus()
+            if status == .connected { return }
+            if status == .invalid || status == .disconnected, lastError != nil {
+                throw TunnelProbeError.providerRejected(lastError ?? "VPN failed to connect.")
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw TunnelProbeError.connectionTimedOut
+    }
+
     private func prepare() async {
         do {
             manager = try await NETunnelProviderManager.loadAllFromPreferences().first
@@ -112,14 +154,58 @@ final class TunnelController {
     }
 
     private func send(config: String, through session: NETunnelProviderSession) async throws -> String? {
+        let response = try await send(data: Data(config.utf8), through: session)
+        return response.flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    private func send(data: Data, through session: NETunnelProviderSession) async throws -> Data? {
         try await withCheckedThrowingContinuation { continuation in
             do {
-                try session.sendProviderMessage(Data(config.utf8)) { data in
-                    continuation.resume(returning: data.flatMap { String(data: $0, encoding: .utf8) })
+                try session.sendProviderMessage(data) { response in
+                    continuation.resume(returning: response)
                 }
             } catch {
                 continuation.resume(throwing: error)
             }
+        }
+    }
+}
+
+private struct TunnelProbeRequest: Codable {
+    let type: String
+    let method: String
+    let probes: [TunnelProbeItem]
+}
+
+private struct TunnelProbeItem: Codable {
+    let id: UUID
+    let address: String
+    let port: Int
+    let outboundTag: String
+}
+
+private struct TunnelProbeResponse: Codable {
+    let results: [TunnelProbeResult]
+    let error: String?
+}
+
+private struct TunnelProbeResult: Codable {
+    let id: UUID
+    let latency: Int?
+}
+
+private enum TunnelProbeError: LocalizedError {
+    case sessionUnavailable
+    case connectionTimedOut
+    case emptyResponse
+    case providerRejected(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .sessionUnavailable: "The VPN tunnel session is unavailable."
+        case .connectionTimedOut: "The VPN did not finish connecting before the test timed out."
+        case .emptyResponse: "The packet tunnel returned no connectivity-test result."
+        case .providerRejected(let message): message
         }
     }
 }

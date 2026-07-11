@@ -20,6 +20,7 @@ struct Form<Content: View>: View {
     private let content: Content
     private let heightOverride: CGFloat?
     private let verticalContentMargin: CGFloat
+    private let bottomContentMargin: CGFloat
     private let horizontalContentMargin: CGFloat
     private let allowsScrolling: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -29,12 +30,14 @@ struct Form<Content: View>: View {
     init(
         height: CGFloat? = nil,
         verticalContentMargin: CGFloat = 8,
+        bottomContentMargin: CGFloat? = nil,
         horizontalContentMargin: CGFloat = 16,
         allowsScrolling: Bool = true,
         @ViewBuilder content: () -> Content
     ) {
         self.heightOverride = height
         self.verticalContentMargin = verticalContentMargin
+        self.bottomContentMargin = bottomContentMargin ?? verticalContentMargin
         self.horizontalContentMargin = horizontalContentMargin
         self.allowsScrolling = allowsScrolling
         self.content = content()
@@ -50,7 +53,8 @@ struct Form<Content: View>: View {
         }
         .scrollContentBackground(.hidden)
         .scrollDisabled(!allowsScrolling)
-        .contentMargins(.vertical, verticalContentMargin, for: .scrollContent)
+        .contentMargins(.top, verticalContentMargin, for: .scrollContent)
+        .contentMargins(.bottom, bottomContentMargin, for: .scrollContent)
         .contentMargins(.horizontal, horizontalContentMargin, for: .scrollContent)
         .background(Color.clear)
         .clipShape(shape)

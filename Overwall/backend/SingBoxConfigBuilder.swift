@@ -25,8 +25,8 @@ struct SingBoxConfigBuilder {
             throw SingBoxConfigError.noValidProxyServer
         }
 
-        let taggedServers = servers.enumerated().map { index, server in
-            (server: server, tag: "server-\(server.id.uuidString)-\(index)")
+        let taggedServers = servers.map { server in
+            (server: server, tag: Self.outboundTag(for: server.id))
         }
         let serverTags = taggedServers.map(\.tag)
         let usableIDs = Set(servers.map(\.id))
@@ -132,6 +132,12 @@ struct SingBoxConfigBuilder {
             ]],
             "outbounds": outbounds,
             "route": route,
+            "experimental": [
+                "clash_api": [
+                    "external_controller": "127.0.0.1:9090",
+                    "secret": "overwall-local-probe",
+                ],
+            ],
         ]
 
         let data = try JSONSerialization.data(
@@ -139,6 +145,10 @@ struct SingBoxConfigBuilder {
             options: [.prettyPrinted, .sortedKeys]
         )
         return String(decoding: data, as: UTF8.self)
+    }
+
+    static func outboundTag(for serverID: UUID) -> String {
+        "server-\(serverID.uuidString)"
     }
 
     private func outbound(_ server: StoredProxyServer, tag: String) -> [String: Any] {

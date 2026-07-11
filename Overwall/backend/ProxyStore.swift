@@ -23,6 +23,11 @@ final class ProxyStore {
 
         if let data = try? Data(contentsOf: persistenceURL),
            var saved = try? decoder.decode(ProxyAppSnapshot.self, from: data) {
+            if let defaultIndex = saved.routeConfigs.firstIndex(where: {
+                $0.name == "Default" && $0.sourceGroupID == nil
+            }) {
+                saved.routeConfigs[defaultIndex].isBuiltIn = true
+            }
             var seenServerIDs: Set<UUID> = []
             var repairedDuplicateIDs = false
             var hasGlobalSelection = false
@@ -78,6 +83,7 @@ final class ProxyStore {
         let id = snapshot.routeConfigs[0].id
         var imported = ShadowrocketConfigParser().parse(text)
         imported.id = id
+        imported.isBuiltIn = true
         snapshot.routeConfigs[0] = imported
         snapshot.selectedConfigID = id
         if let data = try? encoder.encode(snapshot) {

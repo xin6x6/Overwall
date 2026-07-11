@@ -11,6 +11,7 @@ struct CollapsibleForm<Content: View>: View {
     let title: LocalizedStringKey
     private let collapsedHeight: CGFloat
     private let expandedHeight: CGFloat?
+    private let subscriptionUsage: StoredSubscriptionUsage?
 
     @State private var isExpanded: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -23,6 +24,7 @@ struct CollapsibleForm<Content: View>: View {
     init(
         _ title: LocalizedStringKey,
         initiallyExpanded: Bool = true,
+        subscriptionUsage: StoredSubscriptionUsage? = nil,
         collapsedHeight: CGFloat = 52,
         expandedHeight: CGFloat? = nil,
         onRefresh: @escaping () -> Void = {},
@@ -32,6 +34,7 @@ struct CollapsibleForm<Content: View>: View {
     ) {
         self.title = title
         self._isExpanded = State(initialValue: initiallyExpanded)
+        self.subscriptionUsage = subscriptionUsage
         self.collapsedHeight = collapsedHeight
         self.expandedHeight = expandedHeight
         self.onRefresh = onRefresh
@@ -49,6 +52,7 @@ struct CollapsibleForm<Content: View>: View {
             Form(
                 height: currentHeight,
                 verticalContentMargin: 4,
+                bottomContentMargin: isExpanded ? 12 : 4,
                 horizontalContentMargin: 8,
                 allowsScrolling: false
             ) {
@@ -81,6 +85,7 @@ struct CollapsibleForm<Content: View>: View {
         }
         .frame(height: currentHeight)
         .clipped()
+        .background(Color.clear)
     }
 
     private var header: some View {
@@ -100,6 +105,15 @@ struct CollapsibleForm<Content: View>: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
+
+                    if let subscriptionUsage {
+                        Text(subscriptionSummary(subscriptionUsage))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                            .layoutPriority(-1)
+                    }
 
                     Spacer(minLength: 12)
                 }
@@ -136,6 +150,21 @@ struct CollapsibleForm<Content: View>: View {
 
     private var expansionAnimation: Animation? {
         reduceMotion ? nil : .smooth(duration: 0.24)
+    }
+
+    private func subscriptionSummary(_ usage: StoredSubscriptionUsage) -> String {
+        var parts: [String] = []
+        if let upload = usage.upload { parts.append("↑ \(formattedBytes(upload))") }
+        if let download = usage.download { parts.append("↓ \(formattedBytes(download))") }
+        if let total = usage.total { parts.append("Σ \(formattedBytes(total))") }
+        if let expiresAt = usage.expiresAt {
+            parts.append("Exp \(expiresAt.formatted(date: .numeric, time: .omitted))")
+        }
+        return parts.joined(separator: "  ")
+    }
+
+    private func formattedBytes(_ value: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: value, countStyle: .binary)
     }
 
     private var currentHeight: CGFloat? {

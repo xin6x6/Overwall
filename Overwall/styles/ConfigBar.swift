@@ -14,6 +14,7 @@ struct ConfigProfile: Identifiable, Hashable {
     var rules: [StoredRouteRule] = []
     var remoteRuleSets: [StoredRemoteRuleSet] = []
     var generalOptions: [StoredConfigOption] = []
+    var isBuiltIn = false
 
     init(
         id: UUID = UUID(),
@@ -21,7 +22,8 @@ struct ConfigProfile: Identifiable, Hashable {
         subscriptionURL: String = "",
         rules: [StoredRouteRule] = [],
         remoteRuleSets: [StoredRemoteRuleSet] = [],
-        generalOptions: [StoredConfigOption] = []
+        generalOptions: [StoredConfigOption] = [],
+        isBuiltIn: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -29,6 +31,7 @@ struct ConfigProfile: Identifiable, Hashable {
         self.rules = rules
         self.remoteRuleSets = remoteRuleSets
         self.generalOptions = generalOptions
+        self.isBuiltIn = isBuiltIn
     }
 }
 
@@ -110,12 +113,14 @@ struct ConfigBar: View {
         .listRowBackground(Color.clear)
         .environment(\.defaultMinListRowHeight, 52)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button {
-                isConfirmingDeletion = true
-            } label: {
-                Label("Delete", systemImage: "trash")
+            if !config.isBuiltIn {
+                Button {
+                    isConfirmingDeletion = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .tint(.red)
             }
-            .tint(.red)
         }
         .alert("Delete Config?", isPresented: $isConfirmingDeletion) {
             Button("Delete", role: .destructive, action: onDelete)
