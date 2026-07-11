@@ -31,15 +31,40 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 }
 
+enum AppLanguage: String, CaseIterable, Identifiable {
+    case system
+    case english
+    case simplifiedChinese
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .system: "System"
+        case .english: "English"
+        case .simplifiedChinese: "Simplified Chinese"
+        }
+    }
+
+    var locale: Locale? {
+        switch self {
+        case .system: nil
+        case .english: Locale(identifier: "en")
+        case .simplifiedChinese: Locale(identifier: "zh-Hans")
+        }
+    }
+}
+
 struct SettingsView: View {
     @AppStorage("appAppearance") private var appearanceRawValue = AppAppearance.system.rawValue
+    @AppStorage("appLanguage") private var languageRawValue = AppLanguage.system.rawValue
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     Form(
-                        height: 100,
+                        height: 170,
                         verticalContentMargin: 8,
                         bottomContentMargin: 12,
                         allowsScrolling: false
@@ -47,11 +72,27 @@ struct SettingsView: View {
                         Section("Appearance") {
                             Picker("Appearance", selection: $appearanceRawValue) {
                                 ForEach(AppAppearance.allCases) { appearance in
-                                    Label(appearance.title, systemImage: appearance.icon)
+                                    Label(LocalizedStringKey(appearance.title), systemImage: appearance.icon)
                                         .tag(appearance.rawValue)
                                 }
                             }
                             .pickerStyle(.menu)
+                            .onChange(of: appearanceRawValue) { _, _ in
+                                InteractionFeedback.selection()
+                            }
+                        }
+
+                        Section("Language") {
+                            Picker("Language", selection: $languageRawValue) {
+                                ForEach(AppLanguage.allCases) { language in
+                                    Text(LocalizedStringKey(language.title))
+                                        .tag(language.rawValue)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .onChange(of: languageRawValue) { _, _ in
+                                InteractionFeedback.selection()
+                            }
                         }
                     }
                 }

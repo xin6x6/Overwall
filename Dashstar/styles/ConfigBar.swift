@@ -64,7 +64,10 @@ struct ConfigBar: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Button(action: onSelect) {
+            Button {
+                InteractionFeedback.selection()
+                onSelect()
+            } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(config.name)
                         .font(.headline.weight(isSelected ? .bold : .semibold))
@@ -81,9 +84,12 @@ struct ConfigBar: View {
             .frame(maxWidth: .infinity)
             .buttonStyle(.plain)
             .accessibilityLabel(config.name)
-            .accessibilityValue(isSelected ? "Selected" : "Not selected")
+            .accessibilityValue(Text(isSelected ? "Selected" : "Not selected"))
 
-            Button(action: onRefresh) {
+            Button {
+                InteractionFeedback.tap()
+                onRefresh()
+            } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.tint)
@@ -94,6 +100,7 @@ struct ConfigBar: View {
             .accessibilityLabel("Refresh \(config.name)")
 
             Button {
+                InteractionFeedback.tap()
                 isEditing = true
             } label: {
                 Image(systemName: "pencil")
@@ -115,6 +122,7 @@ struct ConfigBar: View {
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if !config.isBuiltIn {
                 Button {
+                    InteractionFeedback.tap()
                     isConfirmingDeletion = true
                 } label: {
                     Label("Delete", systemImage: "trash")
@@ -299,7 +307,7 @@ private struct RouteRuleEditorView: View {
                 Section { Text("USER-AGENT is preserved for Shadowrocket compatibility, but is not enforced by the current sing-box routing engine.") }
             }
         }
-        .navigationTitle(isNew ? "Add Rule" : "Edit Rule")
+        .navigationTitle(Text(isNew ? "Add Rule" : "Edit Rule"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if isNew {

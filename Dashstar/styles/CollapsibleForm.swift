@@ -91,6 +91,7 @@ struct CollapsibleForm<Content: View>: View {
     private var header: some View {
         HStack(spacing: 8) {
             Button {
+                InteractionFeedback.selection()
                 withAnimation(expansionAnimation) {
                     isExpanded.toggle()
                 }
@@ -121,10 +122,13 @@ struct CollapsibleForm<Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isExpanded ? "Collapse" : "Expand")
+            .accessibilityLabel(Text(isExpanded ? "Collapse" : "Expand"))
             .accessibilityValue(Text(title))
 
-            Button(action: onRefresh) {
+            Button {
+                InteractionFeedback.tap()
+                onRefresh()
+            } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.title3)
                     .foregroundStyle(.tint)
@@ -135,7 +139,10 @@ struct CollapsibleForm<Content: View>: View {
             .accessibilityLabel("Refresh")
             .accessibilityValue(Text(title))
 
-            Button(action: onEdit) {
+            Button {
+                InteractionFeedback.tap()
+                onEdit()
+            } label: {
                 Image(systemName: "info.circle")
                     .font(.title3)
                     .foregroundStyle(.tint)

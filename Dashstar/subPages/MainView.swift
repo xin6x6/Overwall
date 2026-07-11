@@ -66,10 +66,10 @@ struct MainView: View {
                     Label("Routing", systemImage: routing == .config ? "arrow.branch" : (routing == .direct ? "arrow.left.and.right" : "globe"))
                 }
                 .onChange(of: routing) { _, mode in
+                    InteractionFeedback.selection()
                     store.mutate { $0.routingMode = StoredRoutingMode(rawValue: mode.rawValue) ?? .config }
                     Task { await tunnel.reload(snapshot: store.snapshot) }
                 }
-                .sensoryFeedback(.selection, trigger: routing)
                 
                     // Test Latency
                 Picker(selection: $testConnectivityMethod) {
@@ -94,10 +94,13 @@ struct MainView: View {
                             }
                         )
                 }
+                .onChange(of: testConnectivityMethod) { _, _ in
+                    InteractionFeedback.selection()
+                }
                 .disabled(isTestingLatency || isTestingSpeed)
-                .sensoryFeedback(.selection, trigger: testConnectivityMethod)
 
                 Button {
+                    InteractionFeedback.tap()
                     Task { await testAllSpeeds() }
                 } label: {
                     Label {
@@ -153,12 +156,14 @@ struct MainView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
+                            InteractionFeedback.tap()
                             addDestination = .server
                         } label: {
                             Label("Add Server", systemImage: "server.rack")
                         }
 
                         Button {
+                            InteractionFeedback.tap()
                             addDestination = .group
                         } label: {
                             Label("Add Group", systemImage: "folder.badge.plus")
@@ -166,6 +171,7 @@ struct MainView: View {
 
 
                         Button {
+                            InteractionFeedback.tap()
                             NotificationCenter.default.post(
                                 name: .importSubscriptionFromClipboard,
                                 object: nil
@@ -255,6 +261,7 @@ struct MainView: View {
         Binding(
             get: { tunnel.isConnected },
             set: { enabled in
+                InteractionFeedback.selection()
                 Task { await tunnel.setEnabled(enabled, snapshot: store.snapshot) }
             }
         )

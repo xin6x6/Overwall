@@ -91,7 +91,9 @@ struct StatisticsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Real-time Traffic").font(.headline)
-                    Text(tunnel.isConnected ? "Bytes per second" : "Connect VPN to view live traffic")
+                    Text(LocalizedStringKey(
+                        tunnel.isConnected ? "Bytes per second" : "Connect VPN to view live traffic"
+                    ))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -111,7 +113,6 @@ struct StatisticsView: View {
                 Label("Picture in Picture", systemImage: "pip")
             }
             .disabled(!tunnel.isConnected && !statisticsPiP.isActive)
-            .sensoryFeedback(.selection, trigger: statisticsPiP.isActive)
 
             if let error = statisticsPiP.lastError {
                 Text(error)
@@ -172,10 +173,9 @@ struct StatisticsView: View {
                     Toggle(isOn: visibilityBinding(for: series)) {
                         HStack(spacing: 8) {
                             Circle().fill(series.color).frame(width: 8, height: 8)
-                            Text(series.rawValue)
+                            Text(LocalizedStringKey(series.rawValue))
                         }
                     }
-                    .sensoryFeedback(.selection, trigger: visibleSeries.contains(series))
                 }
             }
         }

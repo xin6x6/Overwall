@@ -43,7 +43,7 @@ struct ConfigView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         store.mutate { snapshot in
-                            let config = StoredRouteConfig(name: "New Config")
+                            let config = StoredRouteConfig(name: String(localized: "New Config"))
                             snapshot.routeConfigs.append(config)
                             snapshot.selectedConfigID = config.id
                         }
@@ -109,7 +109,7 @@ struct ConfigView: View {
     private func refreshConfig(_ id: UUID) async {
         guard let config = store.snapshot.routeConfigs.first(where: { $0.id == id }),
               let subscriptionURL = config.subscriptionURL, !subscriptionURL.isEmpty else {
-            operationError = "Add a subscribe URL before refreshing this config."
+            operationError = String(localized: "Add a subscribe URL before refreshing this config.")
             return
         }
         do {

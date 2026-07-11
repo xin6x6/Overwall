@@ -37,11 +37,11 @@ final class StatisticsPiPController: NSObject {
 
     func start(tunnel: TunnelController) {
         guard tunnel.isConnected else {
-            lastError = "Connect VPN before enabling Picture in Picture."
+            lastError = String(localized: "Connect VPN before enabling Picture in Picture.")
             return
         }
         guard let controller = pictureInPictureController else {
-            lastError = "Picture in Picture is not supported on this device."
+            lastError = String(localized: "Picture in Picture is not supported on this device.")
             return
         }
         isActive = true
@@ -68,7 +68,7 @@ final class StatisticsPiPController: NSObject {
                 self?.isActive = false
                 self?.updateTask?.cancel()
                 self?.updateTask = nil
-                self?.lastError = "Picture in Picture is not ready. Keep Statistics visible and try again."
+                self?.lastError = String(localized: "Picture in Picture is not ready. Keep Statistics visible and try again.")
                 return
             }
             controller.startPictureInPicture()
@@ -140,7 +140,7 @@ final class StatisticsPiPController: NSObject {
 
         context.setFillColor(UIColor(red: 0.035, green: 0.04, blue: 0.055, alpha: 1).cgColor)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        drawText("Dashstar · Live Traffic", at: CGPoint(x: 28, y: 315), size: 22, color: .white, context: context)
+        drawText(String(localized: "Dashstar · Live Traffic"), at: CGPoint(x: 28, y: 315), size: 22, color: .white, context: context)
         drawText(durationText(from: connectedAt, to: now), at: CGPoint(x: 485, y: 315), size: 18, color: .lightGray, context: context)
 
         let plot = CGRect(x: 42, y: 66, width: 570, height: 220)
@@ -157,9 +157,9 @@ final class StatisticsPiPController: NSObject {
         drawLine(values: points.map(\.direct), color: .systemGreen, maximum: maximum, plot: plot, context: context)
         drawLine(values: points.map(\.proxy), color: .systemPink, maximum: maximum, plot: plot, context: context)
         drawLine(values: points.map(\.total), color: .systemOrange, maximum: maximum, plot: plot, context: context, width: 4)
-        drawText("Direct", at: CGPoint(x: 45, y: 28), size: 16, color: .systemGreen, context: context)
-        drawText("Proxy", at: CGPoint(x: 145, y: 28), size: 16, color: .systemPink, context: context)
-        drawText("Total", at: CGPoint(x: 235, y: 28), size: 16, color: .systemOrange, context: context)
+        drawText(String(localized: "Direct"), at: CGPoint(x: 45, y: 28), size: 16, color: .systemGreen, context: context)
+        drawText(String(localized: "Proxy"), at: CGPoint(x: 145, y: 28), size: 16, color: .systemPink, context: context)
+        drawText(String(localized: "Total"), at: CGPoint(x: 235, y: 28), size: 16, color: .systemOrange, context: context)
 
         var format: CMVideoFormatDescription?
         guard CMVideoFormatDescriptionCreateForImageBuffer(

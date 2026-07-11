@@ -105,7 +105,10 @@ struct ProxyBar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            Button(action: onSelect) {
+            Button {
+                InteractionFeedback.selection()
+                onSelect()
+            } label: {
                 HStack(spacing: 5) {
                     countryIcon
 
@@ -127,9 +130,10 @@ struct ProxyBar: View {
             .frame(maxWidth: .infinity)
             .buttonStyle(.plain)
             .accessibilityLabel(node.name)
-            .accessibilityValue(isSelected ? "Selected" : "Not selected")
+            .accessibilityValue(Text(isSelected ? "Selected" : "Not selected"))
 
             Button {
+                InteractionFeedback.tap()
                 isEditing = true
             } label: {
                 Image(systemName: "pencil")
@@ -150,6 +154,7 @@ struct ProxyBar: View {
         .environment(\.defaultMinListRowHeight, 52)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button {
+                InteractionFeedback.tap()
                 isConfirmingDeletion = true
             } label: {
                 Label("Delete", systemImage: "trash")

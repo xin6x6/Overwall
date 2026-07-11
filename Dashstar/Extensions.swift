@@ -6,6 +6,17 @@
 //
 
 import SwiftUI
+import UIKit
+
+enum InteractionFeedback {
+    static func tap() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    static func selection() {
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+}
 
 extension Color {
     static let background = Color.gray.opacity(0.1)

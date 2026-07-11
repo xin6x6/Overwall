@@ -8,6 +8,13 @@
 import SwiftUI
 import UIKit
 
+private enum AppTab: Hashable {
+    case main
+    case config
+    case statistics
+    case settings
+}
+
 struct ContentView: View {
     @Environment(StatisticsPiPController.self) private var statisticsPiP
     @Environment(ProxyStore.self) private var store
@@ -17,25 +24,32 @@ struct ContentView: View {
     @AppStorage("didRequestInitialNetworkAccess") private var didRequestInitialNetworkAccess = false
     @State private var isShowingClipboardImport = false
     @State private var clipboardImportError: String?
+    @State private var selectedTab: AppTab = .main
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             MainView().tabItem {
                 Label("Main", systemImage: "terminal")
             }
+            .tag(AppTab.main)
             
             ConfigView().tabItem {
                 Label("Config", systemImage: "folder")
             }
+            .tag(AppTab.config)
             
             StatisticsView().tabItem {
                 Label("Statistics", systemImage: "chart.bar")
             }
+            .tag(AppTab.statistics)
             
             SettingsView().tabItem {
                 Label("Settings", systemImage: "gear")
             }
+            .tag(AppTab.settings)
         }
-        .globalInteractionFeedback()
+        .onChange(of: selectedTab) { _, _ in
+            InteractionFeedback.selection()
+        }
         .overlay(alignment: .topLeading) {
             PiPSampleBufferHost(controller: statisticsPiP)
                 .frame(width: 320, height: 180)
@@ -107,11 +121,11 @@ struct ContentView: View {
         guard let url = URL(string: value),
               let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http" else {
-            clipboardImportError = "The clipboard does not contain a valid HTTP or HTTPS subscription URL."
+            clipboardImportError = String(localized: "The clipboard does not contain a valid HTTP or HTTPS subscription URL.")
             return
         }
         guard !store.snapshot.groups.contains(where: { $0.subscriptionURL == value }) else {
-            clipboardImportError = "This subscription has already been imported."
+            clipboardImportError = String(localized: "This subscription has already been imported.")
             return
         }
 
@@ -122,7 +136,7 @@ struct ContentView: View {
                 groupID: groupID
             )
             let groupName = url.host(percentEncoded: false)?.replacingOccurrences(of: "www.", with: "")
-                ?? "Imported Subscription"
+                ?? String(localized: "Imported Subscription")
             store.mutate { snapshot in
                 let anotherGroupIsSelected = snapshot.groups.contains { $0.selectedServerID != nil }
                 let group = StoredProxyGroup(
@@ -158,35 +172,6 @@ extension Notification.Name {
     static let importSubscriptionFromClipboard = Notification.Name(
         "Dashstar.importSubscriptionFromClipboard"
     )
-}
-
-private struct GlobalInteractionFeedback: ViewModifier {
-    @State private var dragFeedback = 0
-    @State private var didTriggerDrag = false
-
-    func body(content: Content) -> some View {
-        content
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
-                        let distance = hypot(value.translation.width, value.translation.height)
-                        if distance > 12, !didTriggerDrag {
-                            didTriggerDrag = true
-                            dragFeedback += 1
-                        }
-                    }
-                    .onEnded { _ in
-                        didTriggerDrag = false
-                    }
-            )
-            .sensoryFeedback(.impact(weight: .light), trigger: dragFeedback)
-    }
-}
-
-private extension View {
-    func globalInteractionFeedback() -> some View {
-        modifier(GlobalInteractionFeedback())
-    }
 }
 
 #Preview {

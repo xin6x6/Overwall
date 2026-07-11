@@ -13,6 +13,7 @@ struct DashstarApp: App {
     @State private var tunnelController = TunnelController()
     @State private var statisticsPiPController = StatisticsPiPController()
     @AppStorage("appAppearance") private var appearanceRawValue = AppAppearance.system.rawValue
+    @AppStorage("appLanguage") private var languageRawValue = AppLanguage.system.rawValue
 
     var body: some Scene {
         WindowGroup {
@@ -22,6 +23,10 @@ struct DashstarApp: App {
                 .environment(statisticsPiPController)
                 .preferredColorScheme(
                     AppAppearance(rawValue: appearanceRawValue)?.colorScheme
+                )
+                .environment(
+                    \.locale,
+                    AppLanguage(rawValue: languageRawValue)?.locale ?? .autoupdatingCurrent
                 )
         }
     }
